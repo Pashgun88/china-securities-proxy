@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: China Securities Data Proxy
+  description: >-
+    REST API-обёртка над AKShare для доступа к финансовой отчётности,
+    дивидендам, дневным котировкам и валютным курсам China A-share (SSE/SZSE)
+    и Hong Kong (HKEX) тикеров.
+  version: 1.0.0
+servers:
+  - url: https://ЗАМЕНИТЬ-НА-МОЙ-АДРЕС.onrender.com
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Проверка живости сервиса
+      responses:
+        "200":
+          description: Сервис работает
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+  /income:
+    get:
+      operationId: getIncomeStatement
+      summary: Отчёт о прибылях и убытках A-share тикера
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /balancesheet:
+    get:
+      operationId: getBalanceSheet
+      summary: Баланс A-share тикера
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /cashflow:
+    get:
+      operationId: getCashFlow
+      summary: Отчёт о движении денежных средств A-share тикера
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /dividend:
+    get:
+      operationId: getDividendHistory
+      summary: История дивидендов A-share тикера
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /daily:
+    get:
+      operationId: getDailyQuotesAShare
+      summary: Дневные котировки A-share тикера
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+        - $ref: "#/components/parameters/startDate"
+        - $ref: "#/components/parameters/endDate"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /hk_daily:
+    get:
+      operationId: getDailyQuotesHK
+      summary: Дневные котировки HK тикера (формат тикера без суффикса .HK, напр. "00267")
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+        - $ref: "#/components/parameters/startDate"
+        - $ref: "#/components/parameters/endDate"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /hk_financial:
+    get:
+      operationId: getFinancialsHK
+      summary: Финансовые показатели HK тикера
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /fx:
+    get:
+      operationId: getFxRateHistory
+      summary: История официальной котировки Банка Китая для валюты к CNY
+      parameters:
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            Китайское название валюты, напр. "港币" (HKD), "美元" (USD),
+            "欧元" (EUR). По умолчанию "港币".
+          schema:
+            type: string
+            default: 港币
+        - $ref: "#/components/parameters/startDate"
+        - $ref: "#/components/parameters/endDate"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /fx_cny_hkd_on_date:
+    get:
+      operationId: getFxRateCnyHkdOnDate
+      summary: >-
+        Официальная котировка Банка Китая (BOC) CNY/HKD на конкретную дату
+        (прямая котировка, не кросс-расчёт)
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Дата в формате YYYY-MM-DD
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Котировка на дату вместе с указанием источника и методологии
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
+                  source:
+                    type: string
+                  methodology:
+                    type: string
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /stock_basic:
+    get:
+      operationId: getStockBasicInfo
+      summary: Базовая информация о тикере (A-share)
+      parameters:
+        - $ref: "#/components/parameters/tsCode"
+      responses:
+        "200":
+          $ref: "#/components/responses/DataResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+components:
+  parameters:
+    tsCode:
+      name: ts_code
+      in: query
+      required: true
+      description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+      schema:
+        type: string
+    startDate:
+      name: start_date
+      in: query
+      required: true
+      description: Дата начала периода в формате YYYY-MM-DD
+      schema:
+        type: string
+    endDate:
+      name: end_date
+      in: query
+      required: true
+      description: Дата конца периода в формате YYYY-MM-DD
+      schema:
+        type: string
+  responses:
+    DataResponse:
+      description: Успешный ответ с данными или пустым результатом
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  type: object
+              note:
+                type: string
+    UpstreamError:
+      description: Ошибка при обращении к источнику данных (AKShare)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
