@@ -7,7 +7,7 @@ info:
     и Hong Kong (HKEX) тикеров.
   version: 1.0.0
 servers:
-  - url: https://ЗАМЕНИТЬ-НА-МОЙ-АДРЕС.onrender.com
+  - url: https://china-securities-proxy.onrender.com
 paths:
   /health:
     get:
