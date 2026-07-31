@@ -7,7 +7,10 @@ import pandas as pd
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from forecast_endpoints import router as forecast_router
+
 app = FastAPI(title="China Securities Data Proxy")
+app.include_router(forecast_router)
 
 app.add_middleware(
     CORSMiddleware,
