@@ -42,7 +42,9 @@ _em_cache: dict = {"data": None, "ts": 0.0}
 
 
 def _df_to_records(df: pd.DataFrame) -> list:
-    return df.where(pd.notnull(df), None).to_dict(orient="records")
+    df = df.astype(object).where(df.notnull(), None)
+    df = df.replace([float("inf"), float("-inf")], None)
+    return df.to_dict(orient="records")
 
 
 # ---------------------------------------------------------------------------
