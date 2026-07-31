@@ -28,82 +28,263 @@ paths:
       operationId: getIncomeStatement
       summary: Отчёт о прибылях и убытках A-share тикера
       parameters:
-        - $ref: "#/components/parameters/tsCode"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /balancesheet:
     get:
       operationId: getBalanceSheet
       summary: Баланс A-share тикера
       parameters:
-        - $ref: "#/components/parameters/tsCode"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /cashflow:
     get:
       operationId: getCashFlow
       summary: Отчёт о движении денежных средств A-share тикера
       parameters:
-        - $ref: "#/components/parameters/tsCode"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /dividend:
     get:
       operationId: getDividendHistory
       summary: История дивидендов A-share тикера
       parameters:
-        - $ref: "#/components/parameters/tsCode"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /daily:
     get:
       operationId: getDailyQuotesAShare
       summary: Дневные котировки A-share тикера
       parameters:
-        - $ref: "#/components/parameters/tsCode"
-        - $ref: "#/components/parameters/startDate"
-        - $ref: "#/components/parameters/endDate"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
+        - name: start_date
+          in: query
+          required: true
+          description: Дата начала периода в формате YYYY-MM-DD
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: true
+          description: Дата конца периода в формате YYYY-MM-DD
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /hk_daily:
     get:
       operationId: getDailyQuotesHK
       summary: Дневные котировки HK тикера (формат тикера без суффикса .HK, напр. "00267")
       parameters:
-        - $ref: "#/components/parameters/tsCode"
-        - $ref: "#/components/parameters/startDate"
-        - $ref: "#/components/parameters/endDate"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
+        - name: start_date
+          in: query
+          required: true
+          description: Дата начала периода в формате YYYY-MM-DD
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: true
+          description: Дата конца периода в формате YYYY-MM-DD
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /hk_financial:
     get:
       operationId: getFinancialsHK
       summary: Финансовые показатели HK тикера
       parameters:
-        - $ref: "#/components/parameters/tsCode"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /fx:
     get:
       operationId: getFxRateHistory
@@ -118,13 +299,41 @@ paths:
           schema:
             type: string
             default: 港币
-        - $ref: "#/components/parameters/startDate"
-        - $ref: "#/components/parameters/endDate"
+        - name: start_date
+          in: query
+          required: true
+          description: Дата начала периода в формате YYYY-MM-DD
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: true
+          description: Дата конца периода в формате YYYY-MM-DD
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /fx_cny_hkd_on_date:
     get:
       operationId: getFxRateCnyHkdOnDate
@@ -157,18 +366,48 @@ paths:
                   methodology:
                     type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /stock_basic:
     get:
       operationId: getStockBasicInfo
       summary: Базовая информация о тикере (A-share)
       parameters:
-        - $ref: "#/components/parameters/tsCode"
+        - name: ts_code
+          in: query
+          required: true
+          description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/DataResponse"
+          description: Успешный ответ с данными или пустым результатом
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  note:
+                    type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /forecast/em/{symbol}:
     get:
       operationId: getForecastEastmoney
@@ -176,12 +415,46 @@ paths:
         Консенсус-прогноз аналитиков Eastmoney (东财) по A-share тикеру.
         Только A-share, код без биржевого суффикса (напр. "601939").
       parameters:
-        - $ref: "#/components/parameters/forecastSymbol"
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код тикера без биржевого суффикса. Для A-share — 6 цифр (напр.
+            "601939"). Для HK — код без .HK, ведущие нули не обязательны
+            (напр. "939" эквивалентно "00939").
+          schema:
+            type: string
       responses:
         "200":
-          $ref: "#/components/responses/ForecastResponse"
+          description: >-
+            Прогноз консенсуса аналитиков либо found:false, если по данному
+            тикеру нет покрытия у этого источника
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  symbol:
+                    type: string
+                  found:
+                    type: boolean
+                  note:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      type: object
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /forecast/ths/{symbol}:
     get:
       operationId: getForecastThs
@@ -189,7 +462,15 @@ paths:
         Консенсус-прогноз аналитиков Tonghuashun/同花顺 по A-share тикеру.
         Только A-share, код без биржевого суффикса (напр. "601939").
       parameters:
-        - $ref: "#/components/parameters/forecastSymbol"
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код тикера без биржевого суффикса. Для A-share — 6 цифр (напр.
+            "601939"). Для HK — код без .HK, ведущие нули не обязательны
+            (напр. "939" эквивалентно "00939").
+          schema:
+            type: string
         - name: indicator
           in: query
           required: false
@@ -203,7 +484,26 @@ paths:
             default: 业绩预测详表-详细指标预测
       responses:
         "200":
-          $ref: "#/components/responses/ForecastResponse"
+          description: >-
+            Прогноз консенсуса аналитиков либо found:false, если по данному
+            тикеру нет покрытия у этого источника
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  symbol:
+                    type: string
+                  found:
+                    type: boolean
+                  note:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      type: object
         "400":
           description: Неверное значение indicator
           content:
@@ -214,7 +514,14 @@ paths:
                   detail:
                     type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /forecast/hk/{symbol}:
     get:
       operationId: getForecastHk
@@ -224,7 +531,15 @@ paths:
         Код без суффикса .HK, ведущие нули не обязательны (напр. "939",
         "3988", "267").
       parameters:
-        - $ref: "#/components/parameters/forecastSymbol"
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код тикера без биржевого суффикса. Для A-share — 6 цифр (напр.
+            "601939"). Для HK — код без .HK, ведущие нули не обязательны
+            (напр. "939" эквивалентно "00939").
+          schema:
+            type: string
         - name: indicator
           in: query
           required: false
@@ -236,7 +551,26 @@ paths:
             default: 综合盈利预测
       responses:
         "200":
-          $ref: "#/components/responses/ForecastResponse"
+          description: >-
+            Прогноз консенсуса аналитиков либо found:false, если по данному
+            тикеру нет покрытия у этого источника
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  symbol:
+                    type: string
+                  found:
+                    type: boolean
+                  note:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      type: object
         "400":
           description: Неверное значение indicator
           content:
@@ -247,7 +581,14 @@ paths:
                   detail:
                     type: string
         "502":
-          $ref: "#/components/responses/UpstreamError"
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /forecast/aggregate/{symbol}:
     get:
       operationId: getForecastAggregate
@@ -257,7 +598,15 @@ paths:
         на A-share (6 цифр); ET Net — если передан hk_symbol, либо сам
         symbol гонконгский.
       parameters:
-        - $ref: "#/components/parameters/forecastSymbol"
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код тикера без биржевого суффикса. Для A-share — 6 цифр (напр.
+            "601939"). Для HK — код без .HK, ведущие нули не обязательны
+            (напр. "939" эквивалентно "00939").
+          schema:
+            type: string
         - name: hk_symbol
           in: query
           required: false
@@ -292,79 +641,4 @@ paths:
                   detail:
                     type: string
 components:
-  parameters:
-    tsCode:
-      name: ts_code
-      in: query
-      required: true
-      description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
-      schema:
-        type: string
-    startDate:
-      name: start_date
-      in: query
-      required: true
-      description: Дата начала периода в формате YYYY-MM-DD
-      schema:
-        type: string
-    endDate:
-      name: end_date
-      in: query
-      required: true
-      description: Дата конца периода в формате YYYY-MM-DD
-      schema:
-        type: string
-    forecastSymbol:
-      name: symbol
-      in: path
-      required: true
-      description: >-
-        Код тикера без биржевого суффикса. Для A-share — 6 цифр (напр.
-        "601939"). Для HK — код без .HK, ведущие нули не обязательны
-        (напр. "939" эквивалентно "00939").
-      schema:
-        type: string
-  responses:
-    ForecastResponse:
-      description: >-
-        Прогноз консенсуса аналитиков либо found:false, если по данному
-        тикеру нет покрытия у этого источника
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              source:
-                type: string
-              symbol:
-                type: string
-              found:
-                type: boolean
-              note:
-                type: string
-              data:
-                type: array
-                items:
-                  type: object
-    DataResponse:
-      description: Успешный ответ с данными или пустым результатом
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              data:
-                type: array
-                items:
-                  type: object
-              note:
-                type: string
-    UpstreamError:
-      description: Ошибка при обращении к источнику данных (AKShare)
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              detail:
-                type: string
+  schemas: {}
