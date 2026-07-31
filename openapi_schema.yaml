@@ -169,6 +169,128 @@ paths:
           $ref: "#/components/responses/DataResponse"
         "502":
           $ref: "#/components/responses/UpstreamError"
+  /forecast/em/{symbol}:
+    get:
+      operationId: getForecastEastmoney
+      summary: >-
+        Консенсус-прогноз аналитиков Eastmoney (东财) по A-share тикеру.
+        Только A-share, код без биржевого суффикса (напр. "601939").
+      parameters:
+        - $ref: "#/components/parameters/forecastSymbol"
+      responses:
+        "200":
+          $ref: "#/components/responses/ForecastResponse"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /forecast/ths/{symbol}:
+    get:
+      operationId: getForecastThs
+      summary: >-
+        Консенсус-прогноз аналитиков Tonghuashun/同花顺 по A-share тикеру.
+        Только A-share, код без биржевого суффикса (напр. "601939").
+      parameters:
+        - $ref: "#/components/parameters/forecastSymbol"
+        - name: indicator
+          in: query
+          required: false
+          description: >-
+            Раздел прогноза THS. Один из: "预测年报每股收益",
+            "预测年报净利润", "业绩预测详表-机构", "业绩预测详表-详细指标预测"
+            (по умолчанию). Значение должно совпадать ТОЧНО, иначе будет
+            пустой результат.
+          schema:
+            type: string
+            default: 业绩预测详表-详细指标预测
+      responses:
+        "200":
+          $ref: "#/components/responses/ForecastResponse"
+        "400":
+          description: Неверное значение indicator
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /forecast/hk/{symbol}:
+    get:
+      operationId: getForecastHk
+      summary: >-
+        Консенсус-прогноз аналитиков ET Net/经济通 по гонконгскому тикеру
+        (основной источник прогнозов для HK-бумаг, напр. BOC/CCB/CITIC).
+        Код без суффикса .HK, ведущие нули не обязательны (напр. "939",
+        "3988", "267").
+      parameters:
+        - $ref: "#/components/parameters/forecastSymbol"
+        - name: indicator
+          in: query
+          required: false
+          description: >-
+            Раздел прогноза ET Net. Один из: "评级总览",
+            "去年度业绩表现", "综合盈利预测" (по умолчанию), "盈利预测概览".
+          schema:
+            type: string
+            default: 综合盈利预测
+      responses:
+        "200":
+          $ref: "#/components/responses/ForecastResponse"
+        "400":
+          description: Неверное значение indicator
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+  /forecast/aggregate/{symbol}:
+    get:
+      operationId: getForecastAggregate
+      summary: >-
+        Собирает все применимые источники прогноза консенсуса по одному
+        тикеру за один вызов: Eastmoney и Tonghuashun — если symbol похож
+        на A-share (6 цифр); ET Net — если передан hk_symbol, либо сам
+        symbol гонконгский.
+      parameters:
+        - $ref: "#/components/parameters/forecastSymbol"
+        - name: hk_symbol
+          in: query
+          required: false
+          description: >-
+            Гонконгский код тикера, если он отличается от symbol (напр.
+            когда symbol — это A-share код, а нужен ещё и HK-прогноз по
+            двойному листингу A+H).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >-
+            Объект с ключом sources, где для каждого применимого источника
+            (eastmoney / 10jqka / etnet) — свой ответ в формате как у
+            соответствующего одиночного эндпоинта, либо {"error": "..."}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  sources:
+                    type: object
+        "400":
+          description: Не удалось определить ни один применимый источник
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
 components:
   parameters:
     tsCode:
@@ -192,7 +314,38 @@ components:
       description: Дата конца периода в формате YYYY-MM-DD
       schema:
         type: string
+    forecastSymbol:
+      name: symbol
+      in: path
+      required: true
+      description: >-
+        Код тикера без биржевого суффикса. Для A-share — 6 цифр (напр.
+        "601939"). Для HK — код без .HK, ведущие нули не обязательны
+        (напр. "939" эквивалентно "00939").
+      schema:
+        type: string
   responses:
+    ForecastResponse:
+      description: >-
+        Прогноз консенсуса аналитиков либо found:false, если по данному
+        тикеру нет покрытия у этого источника
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              source:
+                type: string
+              symbol:
+                type: string
+              found:
+                type: boolean
+              note:
+                type: string
+              data:
+                type: array
+                items:
+                  type: object
     DataResponse:
       description: Успешный ответ с данными или пустым результатом
       content:
