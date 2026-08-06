@@ -21,6 +21,8 @@ import akshare as ak
 import pandas as pd
 from fastapi import APIRouter, Header, HTTPException, Query
 
+from errors import UpstreamError, call_akshare_with_retry
+
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
 PROXY_ACCESS_KEY = os.environ.get("PROXY_ACCESS_KEY")
@@ -61,7 +63,7 @@ def _get_em_full_table() -> pd.DataFrame:
     if _em_cache["data"] is not None and (now - _em_cache["ts"]) < _CACHE_TTL_SECONDS:
         return _em_cache["data"]
 
-    df = ak.stock_profit_forecast_em(symbol="")
+    df = call_akshare_with_retry(ak.stock_profit_forecast_em, symbol="")
     _em_cache["data"] = df
     _em_cache["ts"] = now
     return df
@@ -71,13 +73,12 @@ def _get_em_full_table() -> pd.DataFrame:
 def forecast_em(symbol: str, authorization: Optional[str] = Header(default=None)):
     """Консенсус-прогноз Eastmoney по A-акции. symbol без биржевого суффикса, напр. "601939"."""
     check_auth(authorization)
-    try:
-        df = _get_em_full_table()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Eastmoney fetch failed: {e}")
+    df = _get_em_full_table()
 
     if "代码" not in df.columns:
-        raise HTTPException(status_code=502, detail="Unexpected EM response schema (no '代码' column)")
+        raise UpstreamError(
+            "upstream_unavailable", 502, "Unexpected EM response schema (no '代码' column)", True
+        )
 
     match = df[df["代码"].astype(str).str.zfill(6) == symbol.zfill(6)]
     if match.empty:
@@ -108,13 +109,14 @@ _THS_INDICATORS = [
     "业绩预测详表-机构",
     "业绩预测详表-详细指标预测",
 ]
+_THS_DEFAULT_INDICATOR = "业绩预测详表-详细指标预测"
 
 
 @router.get("/ths/{symbol}")
 def forecast_ths(
     symbol: str,
     indicator: str = Query(
-        "业绩预测详表-详细指标预测",
+        _THS_DEFAULT_INDICATOR,
         description=f"Один из: {_THS_INDICATORS}",
     ),
     authorization: Optional[str] = Header(default=None),
@@ -130,10 +132,7 @@ def forecast_ths(
             status_code=400,
             detail=f"indicator must be exactly one of {_THS_INDICATORS}",
         )
-    try:
-        df = ak.stock_profit_forecast_ths(symbol=symbol, indicator=indicator)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"THS fetch failed: {e}")
+    df = call_akshare_with_retry(ak.stock_profit_forecast_ths, symbol=symbol, indicator=indicator)
 
     if df is None or df.empty:
         return {
@@ -159,12 +158,13 @@ def forecast_ths(
 # ---------------------------------------------------------------------------
 
 _ET_INDICATORS = ["评级总览", "去年度业绩表现", "综合盈利预测", "盈利预测概览"]
+_ET_DEFAULT_INDICATOR = "综合盈利预测"
 
 
 @router.get("/hk/{symbol}")
 def forecast_hk(
     symbol: str,
-    indicator: str = Query("综合盈利预测", description=f"Один из: {_ET_INDICATORS}"),
+    indicator: str = Query(_ET_DEFAULT_INDICATOR, description=f"Один из: {_ET_INDICATORS}"),
     authorization: Optional[str] = Header(default=None),
 ):
     """
@@ -177,10 +177,7 @@ def forecast_hk(
             status_code=400, detail=f"indicator must be exactly one of {_ET_INDICATORS}"
         )
     hk_symbol = symbol.zfill(5)
-    try:
-        df = ak.stock_hk_profit_forecast_et(symbol=hk_symbol, indicator=indicator)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"ET Net fetch failed: {e}")
+    df = call_akshare_with_retry(ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=indicator)
 
     if df is None or df.empty:
         return {
@@ -204,6 +201,26 @@ def forecast_hk(
 # ---------------------------------------------------------------------------
 # 4. Агрегатор — собирает применимые источники по одному коду
 # ---------------------------------------------------------------------------
+
+def _source_error(exc) -> dict:
+    """
+    Единый формат ошибки одного источника внутри /forecast/aggregate — сбой
+    одного источника не должен обрывать ответ по остальным применимым.
+    """
+    if isinstance(exc, UpstreamError):
+        return {
+            "error": True,
+            "error_type": exc.error_type,
+            "message": exc.message,
+            "retryable": exc.retryable,
+        }
+    return {
+        "error": True,
+        "error_type": "internal_error",
+        "message": str(exc.detail),
+        "retryable": False,
+    }
+
 
 @router.get("/aggregate/{symbol}")
 def forecast_aggregate(
@@ -230,19 +247,23 @@ def forecast_aggregate(
     if is_a_share_like:
         try:
             results["sources"]["eastmoney"] = forecast_em(symbol, authorization)
-        except HTTPException as e:
-            results["sources"]["eastmoney"] = {"error": e.detail}
+        except (UpstreamError, HTTPException) as e:
+            results["sources"]["eastmoney"] = _source_error(e)
         try:
-            results["sources"]["10jqka"] = forecast_ths(symbol, authorization=authorization)
-        except HTTPException as e:
-            results["sources"]["10jqka"] = {"error": e.detail}
+            results["sources"]["10jqka"] = forecast_ths(
+                symbol, indicator=_THS_DEFAULT_INDICATOR, authorization=authorization
+            )
+        except (UpstreamError, HTTPException) as e:
+            results["sources"]["10jqka"] = _source_error(e)
 
     hk_code = hk_symbol or (symbol if not is_a_share_like else None)
     if hk_code:
         try:
-            results["sources"]["etnet"] = forecast_hk(hk_code, authorization=authorization)
-        except HTTPException as e:
-            results["sources"]["etnet"] = {"error": e.detail}
+            results["sources"]["etnet"] = forecast_hk(
+                hk_code, indicator=_ET_DEFAULT_INDICATOR, authorization=authorization
+            )
+        except (UpstreamError, HTTPException) as e:
+            results["sources"]["etnet"] = _source_error(e)
 
     if not results["sources"]:
         raise HTTPException(

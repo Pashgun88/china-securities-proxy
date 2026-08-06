@@ -4,13 +4,45 @@ from typing import Optional
 
 import akshare as ak
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from errors import UpstreamError, call_akshare_with_retry, classify_exception
 from forecast_endpoints import router as forecast_router
 
 app = FastAPI(title="China Securities Data Proxy")
 app.include_router(forecast_router)
+
+
+@app.exception_handler(UpstreamError)
+async def upstream_error_handler(request: Request, exc: UpstreamError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "error_type": exc.error_type,
+            "endpoint": request.url.path,
+            "message": exc.message,
+            "retryable": exc.retryable,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Страховка для любых необработанных исключений (не только из akshare)."""
+    error_type, status_code, retryable = classify_exception(exc)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "error_type": error_type,
+            "endpoint": request.url.path,
+            "message": str(exc)[:300],
+            "retryable": retryable,
+        },
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,10 +78,7 @@ def df_response(df: Optional[pd.DataFrame]) -> dict:
 
 
 def call_akshare(func, **kwargs):
-    try:
-        return func(**kwargs)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    return call_akshare_with_retry(func, **kwargs)
 
 
 @app.get("/health")
