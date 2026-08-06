@@ -77,7 +77,10 @@ def forecast_em(symbol: str, authorization: Optional[str] = Header(default=None)
 
     if "代码" not in df.columns:
         raise UpstreamError(
-            "upstream_unavailable", 502, "Unexpected EM response schema (no '代码' column)", True
+            "upstream_response_changed",
+            502,
+            "Unexpected EM response schema (no '代码' column)",
+            False,
         )
 
     match = df[df["代码"].astype(str).str.zfill(6) == symbol.zfill(6)]

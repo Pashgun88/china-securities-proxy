@@ -69,6 +69,17 @@ def clean_ticker(ts_code: str) -> str:
     return code
 
 
+def clean_hk_ticker(ts_code: str) -> str:
+    """
+    HK-эндпоинты akshare (stock_financial_hk_report_em, stock_hk_hist) матчат
+    тикер по точному 5-значному коду с ведущими нулями (напр. "00175") —
+    без паддинга запрос по коду вида "175"/"0175" не находит ничего у
+    Eastmoney и падает с TypeError при разборе пустого result, а не с
+    осмысленной ошибкой "не найдено".
+    """
+    return clean_ticker(ts_code).zfill(5)
+
+
 def df_response(df: Optional[pd.DataFrame]) -> dict:
     if df is None or df.empty:
         return {"data": [], "note": "не найдено — источник вернул пустой результат"}
@@ -151,7 +162,7 @@ def hk_daily(
     authorization: Optional[str] = Header(default=None),
 ):
     check_auth(authorization)
-    code = clean_ticker(ts_code)
+    code = clean_hk_ticker(ts_code)
     df = call_akshare(
         ak.stock_hk_hist,
         symbol=code,
@@ -166,7 +177,7 @@ def hk_daily(
 @app.get("/hk_financial")
 def hk_financial(ts_code: str = Query(...), authorization: Optional[str] = Header(default=None)):
     check_auth(authorization)
-    code = clean_ticker(ts_code)
+    code = clean_hk_ticker(ts_code)
     df = call_akshare(ak.stock_financial_hk_report_em, stock=code, symbol="资产负债表", indicator="年度")
     return df_response(df)
 
