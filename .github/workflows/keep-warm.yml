@@ -1,0 +1,29 @@
+name: Keep Render service warm
+
+# Пингуем /health каждые 10 минут, чтобы Render free tier не усыплял сервис
+# после простоя. Эндпоинт /health намеренно не защищён Bearer-авторизацией
+# именно для таких целей — секреты здесь не нужны.
+#
+# Важно: расписание cron в GitHub Actions — это НЕ гарантия точного
+# интервала. При высокой нагрузке на инфраструктуру GitHub запуск может
+# опаздывать на несколько минут (иногда больше). Это нормально и не
+# критично для задачи прогрева — не удивляйтесь, если в истории запусков
+# интервалы будут не ровно 10 минут.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+            "https://china-securities-proxy.onrender.com/health")
+          echo "HTTP status: $status"
+          if [ "$status" != "200" ]; then
+            echo "::warning::Health check returned HTTP $status"
+          fi
