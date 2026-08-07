@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime
 from typing import Optional
 
 import akshare as ak
@@ -164,14 +165,16 @@ def hk_daily(
 ):
     check_auth(authorization)
     code = clean_hk_ticker(ts_code)
-    df = call_akshare(
-        ak.stock_hk_hist,
-        symbol=code,
-        period="daily",
-        start_date=start_date.replace("-", ""),
-        end_date=end_date.replace("-", ""),
-        adjust="qfq",
-    )
+    # ak.stock_hk_hist (Eastmoney kline API, 33.push2his.eastmoney.com) регулярно
+    # обрывает соединение без ответа — как с датацентровых IP (Render), так и
+    # локально, независимо от заголовков/повторов. ak.stock_hk_daily (Sina)
+    # отдаёт ту же дневную историю надёжно, но не принимает диапазон дат —
+    # тянем всю историю и фильтруем на своей стороне.
+    df = call_akshare(ak.stock_hk_daily, symbol=code, adjust="qfq")
+    if df is not None and not df.empty:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        df = df[(df["date"] >= start) & (df["date"] <= end)]
     return df_response(df)
 
 
