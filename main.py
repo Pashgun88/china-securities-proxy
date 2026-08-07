@@ -8,6 +8,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from broker_consensus import fetch_aastocks_consensus
 from errors import UpstreamError, call_akshare_with_retry, classify_exception
 from forecast_endpoints import router as forecast_router
 
@@ -216,3 +217,14 @@ def stock_basic(ts_code: str = Query(...), authorization: Optional[str] = Header
     code = clean_ticker(ts_code)
     df = call_akshare(ak.stock_individual_info_em, symbol=code)
     return df_response(df)
+
+
+@app.get("/consensus/aastocks/{symbol}")
+def consensus_aastocks(symbol: str, authorization: Optional[str] = Header(default=None)):
+    """
+    Manual/low-frequency use only — not for automated polling. Парсит
+    research-заметки AASTOCKS.com по HK-тикеру (ожидается 1-2 запуска в год).
+    НЕ подключён к keep-warm workflow и не должен вызываться автоматически.
+    """
+    check_auth(authorization)
+    return fetch_aastocks_consensus(symbol)

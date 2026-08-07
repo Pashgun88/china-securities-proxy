@@ -3,3 +3,4 @@ uvicorn[standard]
 akshare
 pandas
 requests
+beautifulsoup4

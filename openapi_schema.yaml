@@ -640,5 +640,80 @@ paths:
                 properties:
                   detail:
                     type: string
+  /consensus/aastocks/{symbol}:
+    get:
+      operationId: getConsensusAastocks
+      summary: >-
+        Manual/low-frequency use only — не для автоматического опроса.
+        Консенсус-прогнозы брокеров (rating, target price) по HK-тикеру,
+        собранные из research-заметок AASTOCKS.com. Ожидается 1-2 запуска
+        в год на несколько тикеров, не подключён к keep-warm пингу.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код тикера HKEX без суффикса .HK, ведущие нули не обязательны
+            (напр. "939" эквивалентно "00939").
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >-
+            Список research-заметок с брокером, рейтингом и target price
+            (эвристическое извлечение из свободного текста — сверяйте с
+            полями headline/raw_snippet), либо found:false, если подходящих
+            заметок не найдено.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  symbol:
+                    type: string
+                  found:
+                    type: boolean
+                  note:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        broker:
+                          type: string
+                        headline:
+                          type: string
+                        rating:
+                          type: string
+                        target_price_old:
+                          type: number
+                        target_price_new:
+                          type: number
+                        date:
+                          type: string
+                        source_url:
+                          type: string
+                        raw_snippet:
+                          type: string
+        "502":
+          description: Сбой апстрима (сеть) или изменение структуры страницы AASTOCKS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: boolean
+                  error_type:
+                    type: string
+                  endpoint:
+                    type: string
+                  message:
+                    type: string
+                  retryable:
+                    type: boolean
 components:
   schemas: {}

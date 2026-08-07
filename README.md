@@ -51,6 +51,17 @@ docker run -p 8000:8000 -e PROXY_ACCESS_KEY=mysecret china-securities-proxy
 | GET | /fx | курс валюты к CNY (Bank of China) |
 | GET | /fx_cny_hkd_on_date | курс CNY/HKD на конкретную дату (BOC) |
 | GET | /stock_basic | базовая информация о тикере |
+| GET | /consensus/aastocks/{symbol} | консенсус-прогнозы брокеров (HK), парсинг AASTOCKS.com — **manual/low-frequency use only** |
+
+### /consensus/aastocks/{symbol}
+
+Manual/low-frequency use only — not for automated polling. Респектует ToS
+AASTOCKS.com тем, что ограничивается редкими ручными запросами (ожидается
+1-2 запуска в год на несколько тикеров), а не постоянным опросом. Не
+подключён к keep-warm workflow (`.github/workflows/keep-warm.yml`) и не
+вызывается автоматически ни одним другим эндпоинтом или воркфлоу проекта —
+запускать только вручную. Подробности парсинга и его ограничения — см.
+docstring в [broker_consensus.py](broker_consensus.py).
 
 ## Деплой
 
