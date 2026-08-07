@@ -21,8 +21,8 @@ jobs:
     steps:
       - name: Ping /health
         run: |
-          status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
-            "https://china-securities-proxy.onrender.com/health")
+          status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 \
+            "https://china-securities-proxy.onrender.com/health" || echo "curl_error")
           echo "HTTP status: $status"
           if [ "$status" != "200" ]; then
             echo "::warning::Health check returned HTTP $status"
