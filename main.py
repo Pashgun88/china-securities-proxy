@@ -156,14 +156,34 @@ def daily(
     return df_response(df)
 
 
+_HK_RESAMPLE_RULE = {"weekly": "W", "monthly": "ME", "yearly": "YE"}
+
+
+def _resample_hk_daily(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    agg = df.resample(_HK_RESAMPLE_RULE[interval]).agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum", "amount": "sum"}
+    )
+    agg = agg.dropna(subset=["open"]).reset_index()
+    agg["date"] = agg["date"].dt.strftime("%Y-%m-%d")
+    return agg
+
+
 @app.get("/hk_daily")
 def hk_daily(
     ts_code: str = Query(...),
     start_date: str = Query(...),
     end_date: str = Query(...),
+    interval: str = Query(
+        "daily", description="daily (по умолчанию) | weekly | monthly | yearly — агрегация OHLCV"
+    ),
     authorization: Optional[str] = Header(default=None),
 ):
     check_auth(authorization)
+    if interval not in ("daily", "weekly", "monthly", "yearly"):
+        raise HTTPException(status_code=400, detail="interval must be one of: daily, weekly, monthly, yearly")
     code = clean_hk_ticker(ts_code)
     # ak.stock_hk_hist (Eastmoney kline API, 33.push2his.eastmoney.com) регулярно
     # обрывает соединение без ответа — как с датацентровых IP (Render), так и
@@ -175,6 +195,10 @@ def hk_daily(
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
         df = df[(df["date"] >= start) & (df["date"] <= end)]
+        if interval != "daily" and not df.empty:
+            df = _resample_hk_daily(df, interval)
+    if df is not None and not df.empty:
+        df = df.round(4)
     return df_response(df)
 
 

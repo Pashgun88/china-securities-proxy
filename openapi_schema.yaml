@@ -208,7 +208,11 @@ paths:
   /hk_daily:
     get:
       operationId: getDailyQuotesHK
-      summary: Дневные котировки HK тикера (формат тикера без суффикса .HK, напр. "00267")
+      summary: >-
+        Дневные котировки HK тикера (формат тикера без суффикса .HK, напр.
+        "00267"). Для периодов от ~2 лет и больше используйте interval=weekly
+        или monthly/yearly — daily-ответ на несколько лет может быть очень
+        большим и медленным.
       parameters:
         - name: ts_code
           in: query
@@ -228,6 +232,17 @@ paths:
           description: Дата конца периода в формате YYYY-MM-DD
           schema:
             type: string
+        - name: interval
+          in: query
+          required: false
+          description: >-
+            Агрегация OHLCV: "daily" (по умолчанию, вся история по дням —
+            для многолетних периодов ответ большой), "weekly", "monthly"
+            или "yearly" (одна строка на период: open первого дня, high/low
+            экстремумы, close последнего дня, volume/amount — сумма).
+          schema:
+            type: string
+            default: daily
       responses:
         "200":
           description: Успешный ответ с данными или пустым результатом
