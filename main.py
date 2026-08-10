@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from broker_consensus import fetch_aastocks_consensus
-from errors import UpstreamError, call_akshare_with_retry, classify_exception
+from errors import UpstreamError, cached_call, call_akshare_with_retry, classify_exception
 from forecast_endpoints import router as forecast_router
 
 app = FastAPI(title="China Securities Data Proxy")
@@ -189,8 +189,10 @@ def hk_daily(
     # обрывает соединение без ответа — как с датацентровых IP (Render), так и
     # локально, независимо от заголовков/повторов. ak.stock_hk_daily (Sina)
     # отдаёт ту же дневную историю надёжно, но не принимает диапазон дат —
-    # тянем всю историю и фильтруем на своей стороне.
-    df = call_akshare(ak.stock_hk_daily, symbol=code, adjust="qfq")
+    # тянем всю историю и фильтруем на своей стороне. Кэшируем full-history
+    # результат на 30 мин на тикер — меньше живых обращений к апстриму и
+    # быстрее повторные вопросы про один и тот же тикер в рамках диалога.
+    df = cached_call(f"hk_daily:{code}", 1800, ak.stock_hk_daily, symbol=code, adjust="qfq")
     if df is not None and not df.empty:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -206,7 +208,16 @@ def hk_daily(
 def hk_financial(ts_code: str = Query(...), authorization: Optional[str] = Header(default=None)):
     check_auth(authorization)
     code = clean_hk_ticker(ts_code)
-    df = call_akshare(ak.stock_financial_hk_report_em, stock=code, symbol="资产负债表", indicator="年度")
+    # Финансовая отчётность не меняется внутри дня — кэш на 6ч (как EM-кэш
+    # в forecast_endpoints.py) снижает число живых обращений к апстриму.
+    df = cached_call(
+        f"hk_financial:{code}",
+        6 * 3600,
+        ak.stock_financial_hk_report_em,
+        stock=code,
+        symbol="资产负债表",
+        indicator="年度",
+    )
     return df_response(df)
 
 

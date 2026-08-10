@@ -33,10 +33,12 @@ import requests
 
 logger = logging.getLogger("china_securities_proxy.upstream")
 
-RETRY_ATTEMPTS = 1
+RETRY_ATTEMPTS = 2
 RETRY_DELAY_SECONDS = 2
 
 T = TypeVar("T")
+
+_cache_store: dict = {}
 
 _PARSING_ERRORS = (TypeError, KeyError, IndexError, AttributeError)
 
@@ -103,11 +105,11 @@ def _log_response_snapshot(exc: Exception) -> None:
 
 def call_akshare_with_retry(func: Callable[..., T], **kwargs) -> T:
     """
-    Вызывает akshare-функцию с одним повтором через RETRY_DELAY_SECONDS —
-    но только если сбой похож на сетевой. Ошибки парсинга (см. модульный
-    docstring) не ретраятся: повтор того же запроса даст тот же результат.
-    Пустой DataFrame (данных реально нет) — это не исключение и ретрая не
-    касается.
+    Вызывает akshare-функцию с повтором (RETRY_ATTEMPTS раз, пауза
+    RETRY_DELAY_SECONDS) — но только если сбой похож на сетевой. Ошибки
+    парсинга (см. модульный docstring) не ретраятся: повтор того же
+    запроса даст тот же результат. Пустой DataFrame (данных реально нет) —
+    это не исключение и ретрая не касается.
     """
     last_exc: Exception
     for attempt in range(RETRY_ATTEMPTS + 1):
@@ -123,3 +125,22 @@ def call_akshare_with_retry(func: Callable[..., T], **kwargs) -> T:
 
     error_type, status_code, retryable = classify_exception(last_exc)
     raise UpstreamError(error_type, status_code, str(last_exc)[:300], retryable) from last_exc
+
+
+def cached_call(key: str, ttl_seconds: int, func: Callable[..., T], **kwargs) -> T:
+    """
+    TTL-кэш поверх call_akshare_with_retry — общий на процесс (как и
+    _em_cache в forecast_endpoints.py, которому этот хелпер эквивалентен).
+    Снижает и число живых обращений к апстриму (меньше шансов словить
+    временный сбой), и задержку ответа при повторных запросах одного
+    тикера — типичный паттерн, когда GPT уточняет один и тот же тикер
+    несколько раз подряд в диалоге.
+    """
+    now = time.time()
+    entry = _cache_store.get(key)
+    if entry is not None and (now - entry["ts"]) < ttl_seconds:
+        return entry["data"]
+
+    result = call_akshare_with_retry(func, **kwargs)
+    _cache_store[key] = {"data": result, "ts": now}
+    return result
