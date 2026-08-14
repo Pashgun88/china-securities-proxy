@@ -23,6 +23,28 @@ paths:
                 properties:
                   status:
                     type: string
+  /date:
+    get:
+      operationId: getServerDate
+      summary: >-
+        Сегодняшняя дата по часам сервера. Вызывай её перед любым разбором
+        актуальности данных: собственная дата модели ненадёжна, и без этого
+        прогнозы на уже прошедшие годы можно принять за актуальные.
+      responses:
+        "200":
+          description: Текущая дата и время сервера (UTC)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  today:
+                    type: string
+                    description: Дата в формате YYYY-MM-DD
+                  year:
+                    type: integer
+                  datetime_utc:
+                    type: string
   /income:
     get:
       operationId: getIncomeStatement
@@ -439,6 +461,17 @@ paths:
             (напр. "939" эквивалентно "00939").
           schema:
             type: string
+        - name: include_past
+          in: query
+          required: false
+          description: >-
+            По умолчанию false — возвращаются только прогнозы на текущий год
+            и последующие, уже прошедшие годы отфильтровываются. true — вернуть
+            всё, включая устаревшие периоды; запрашивай только если пользователь
+            явно просит исторические прогнозы.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: >-
@@ -453,6 +486,24 @@ paths:
                     type: string
                   symbol:
                     type: string
+                  today:
+                    type: string
+                    description: >-
+                      Сегодняшняя дата по часам сервера (YYYY-MM-DD). Считай
+                      её текущей датой, а не ту, что модель помнит сама.
+                  retrieved_at:
+                    type: string
+                    description: >-
+                      Момент получения данных из источника (ISO 8601, UTC).
+                      Цитируй его как дату данных; никогда не подставляй
+                      прогнозные цифры по памяти модели.
+                  dropped_past_periods:
+                    type: array
+                    description: >-
+                      Периоды, отброшенные как уже прошедшие (по умолчанию
+                      возвращаются только прогнозы на текущий год и позже).
+                    items:
+                      type: string
                   found:
                     type: boolean
                   note:
@@ -497,6 +548,17 @@ paths:
           schema:
             type: string
             default: 业绩预测详表-详细指标预测
+        - name: include_past
+          in: query
+          required: false
+          description: >-
+            По умолчанию false — возвращаются только прогнозы на текущий год
+            и последующие, уже прошедшие годы отфильтровываются. true — вернуть
+            всё, включая устаревшие периоды; запрашивай только если пользователь
+            явно просит исторические прогнозы.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: >-
@@ -511,6 +573,24 @@ paths:
                     type: string
                   symbol:
                     type: string
+                  today:
+                    type: string
+                    description: >-
+                      Сегодняшняя дата по часам сервера (YYYY-MM-DD). Считай
+                      её текущей датой, а не ту, что модель помнит сама.
+                  retrieved_at:
+                    type: string
+                    description: >-
+                      Момент получения данных из источника (ISO 8601, UTC).
+                      Цитируй его как дату данных; никогда не подставляй
+                      прогнозные цифры по памяти модели.
+                  dropped_past_periods:
+                    type: array
+                    description: >-
+                      Периоды, отброшенные как уже прошедшие (по умолчанию
+                      возвращаются только прогнозы на текущий год и позже).
+                    items:
+                      type: string
                   found:
                     type: boolean
                   note:
@@ -564,6 +644,17 @@ paths:
           schema:
             type: string
             default: 综合盈利预测
+        - name: include_past
+          in: query
+          required: false
+          description: >-
+            По умолчанию false — возвращаются только прогнозы на текущий год
+            и последующие, уже прошедшие годы отфильтровываются. true — вернуть
+            всё, включая устаревшие периоды; запрашивай только если пользователь
+            явно просит исторические прогнозы.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: >-
@@ -578,6 +669,24 @@ paths:
                     type: string
                   symbol:
                     type: string
+                  today:
+                    type: string
+                    description: >-
+                      Сегодняшняя дата по часам сервера (YYYY-MM-DD). Считай
+                      её текущей датой, а не ту, что модель помнит сама.
+                  retrieved_at:
+                    type: string
+                    description: >-
+                      Момент получения данных из источника (ISO 8601, UTC).
+                      Цитируй его как дату данных; никогда не подставляй
+                      прогнозные цифры по памяти модели.
+                  dropped_past_periods:
+                    type: array
+                    description: >-
+                      Периоды, отброшенные как уже прошедшие (по умолчанию
+                      возвращаются только прогнозы на текущий год и позже).
+                    items:
+                      type: string
                   found:
                     type: boolean
                   note:
@@ -631,6 +740,17 @@ paths:
             двойному листингу A+H).
           schema:
             type: string
+        - name: include_past
+          in: query
+          required: false
+          description: >-
+            По умолчанию false — возвращаются только прогнозы на текущий год
+            и последующие, уже прошедшие годы отфильтровываются. true — вернуть
+            всё, включая устаревшие периоды; запрашивай только если пользователь
+            явно просит исторические прогнозы.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: >-
@@ -643,6 +763,13 @@ paths:
                 type: object
                 properties:
                   symbol:
+                    type: string
+                  today:
+                    type: string
+                    description: >-
+                      Сегодняшняя дата по часам сервера (YYYY-MM-DD). Считай
+                      её текущей датой, а не ту, что модель помнит сама.
+                  retrieved_at:
                     type: string
                   sources:
                     type: object
@@ -688,6 +815,24 @@ paths:
                     type: string
                   symbol:
                     type: string
+                  today:
+                    type: string
+                    description: >-
+                      Сегодняшняя дата по часам сервера (YYYY-MM-DD). Считай
+                      её текущей датой, а не ту, что модель помнит сама.
+                  retrieved_at:
+                    type: string
+                    description: >-
+                      Момент получения данных из источника (ISO 8601, UTC).
+                      Цитируй его как дату данных; никогда не подставляй
+                      прогнозные цифры по памяти модели.
+                  dropped_past_periods:
+                    type: array
+                    description: >-
+                      Периоды, отброшенные как уже прошедшие (по умолчанию
+                      возвращаются только прогнозы на текущий год и позже).
+                    items:
+                      type: string
                   found:
                     type: boolean
                   note:

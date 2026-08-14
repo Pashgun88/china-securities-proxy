@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import akshare as ak
@@ -255,6 +255,22 @@ def stock_basic(ts_code: str = Query(...), authorization: Optional[str] = Header
     code = clean_ticker(ts_code)
     df = call_akshare(ak.stock_individual_info_em, symbol=code)
     return df_response(df)
+
+
+@app.get("/date")
+def server_date():
+    """
+    Текущая дата сервера. Нужна GPT: собственных часов у модели нет, а дата в
+    её контексте может расходиться с реальной — без этого она принимает
+    прогнозы на уже прошедшие годы за актуальные. Авторизация не требуется:
+    ничего чувствительного не отдаёт, а вызывается перед каждым разбором дат.
+    """
+    now = datetime.now(timezone.utc)
+    return {
+        "today": now.date().isoformat(),
+        "year": now.year,
+        "datetime_utc": now.isoformat(timespec="seconds"),
+    }
 
 
 @app.get("/consensus/aastocks/{symbol}")

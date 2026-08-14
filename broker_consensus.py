@@ -26,6 +26,7 @@ price эвристическое — в каждой записи всегда �
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -286,6 +287,7 @@ def fetch_aastocks_consensus(symbol: str) -> dict:
     return {
         "source": "aastocks",
         "symbol": hk_symbol,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "found": bool(reports),
         "note": None if reports else "не найдено — нет research-заметок с рейтингом/TP на текущей странице новостей",
         "data": reports,

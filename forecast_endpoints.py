@@ -14,7 +14,9 @@ forecast_endpoints.py
 """
 
 import os
+import re
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import akshare as ak
@@ -43,10 +45,62 @@ _CACHE_TTL_SECONDS = 6 * 60 * 60  # 6 часов
 _em_cache: dict = {"data": None, "ts": 0.0}
 
 
+def _now_iso() -> str:
+    """Дата получения данных — чтобы GPT цитировал её, а не выдумывал актуальность."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _current_year() -> int:
+    return datetime.now(timezone.utc).year
+
+
 def _df_to_records(df: pd.DataFrame) -> list:
     df = df.astype(object).where(df.notnull(), None)
     df = df.replace([float("inf"), float("-inf")], None)
     return df.to_dict(orient="records")
+
+
+# Год в ответах источников встречается в двух видах, поэтому фильтруем оба:
+#   - строкой (ET Net "财政年度", THS "年度") — отбрасываем строки прошлых лет;
+#   - в имени колонки (EM "2025预测每股收益", THS "2023-实际值") — отбрасываем колонки.
+_PERIOD_COLUMNS = ("财政年度", "年度", "报告年度")
+_YEAR_IN_NAME = re.compile(r"(19|20)\d{2}")
+
+
+def _drop_past_periods(df: pd.DataFrame) -> tuple:
+    """
+    Оставляет только периоды текущего года и позже. Возвращает (df, dropped),
+    где dropped — список отброшенных периодов, чтобы ответ оставался прозрачным
+    и было видно, что данные урезаны, а не отсутствуют у источника.
+    """
+    if df is None or df.empty:
+        return df, []
+
+    year = _current_year()
+    dropped = []
+
+    period_col = next((c for c in _PERIOD_COLUMNS if c in df.columns), None)
+    if period_col is not None:
+        years = pd.to_numeric(df[period_col], errors="coerce")
+        # NaN (нераспознанный период) сохраняем: лучше лишняя строка, чем молча потерянная.
+        keep = years.isna() | (years >= year)
+        dropped = [str(v) for v in df.loc[~keep, period_col].tolist()]
+        df = df[keep]
+
+    stale_cols = []
+    for col in df.columns:
+        match = _YEAR_IN_NAME.search(str(col))
+        if match and int(match.group(0)) < year:
+            stale_cols.append(col)
+    if stale_cols:
+        dropped.extend(str(c) for c in stale_cols)
+        df = df.drop(columns=stale_cols)
+
+    return df, dropped
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +123,21 @@ def _get_em_full_table() -> pd.DataFrame:
     return df
 
 
+def _em_cache_iso() -> Optional[str]:
+    """Для EM данные могут быть из кэша — отдаём время их фактической загрузки."""
+    if not _em_cache["ts"]:
+        return None
+    return datetime.fromtimestamp(_em_cache["ts"], timezone.utc).isoformat(timespec="seconds")
+
+
 @router.get("/em/{symbol}")
-def forecast_em(symbol: str, authorization: Optional[str] = Header(default=None)):
+def forecast_em(
+    symbol: str,
+    include_past: bool = Query(
+        False, description="true — вернуть также прогнозы на уже прошедшие годы"
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
     """Консенсус-прогноз Eastmoney по A-акции. symbol без биржевого суффикса, напр. "601939"."""
     check_auth(authorization)
     df = _get_em_full_table()
@@ -88,16 +155,25 @@ def forecast_em(symbol: str, authorization: Optional[str] = Header(default=None)
         return {
             "source": "eastmoney",
             "symbol": symbol,
+            "today": _today(),
+            "retrieved_at": _em_cache_iso(),
             "found": False,
             "note": "не найдено — нет покрытия аналитиками EM либо код не A-share",
             "data": [],
         }
 
+    dropped = []
+    if not include_past:
+        match, dropped = _drop_past_periods(match)
+
     return {
         "source": "eastmoney",
         "symbol": symbol,
         "found": True,
+        "today": _today(),
+        "retrieved_at": _em_cache_iso(),
         "as_of_cache_ts": _em_cache["ts"],
+        "dropped_past_periods": dropped,
         "data": _df_to_records(match),
     }
 
@@ -122,6 +198,9 @@ def forecast_ths(
         _THS_DEFAULT_INDICATOR,
         description=f"Один из: {_THS_INDICATORS}",
     ),
+    include_past: bool = Query(
+        False, description="true — вернуть также прогнозы/факт на уже прошедшие годы"
+    ),
     authorization: Optional[str] = Header(default=None),
 ):
     """
@@ -142,16 +221,25 @@ def forecast_ths(
             "source": "10jqka",
             "symbol": symbol,
             "indicator": indicator,
+            "today": _today(),
+            "retrieved_at": _now_iso(),
             "found": False,
             "note": "не найдено — либо нет покрытия, либо неверный indicator",
             "data": [],
         }
 
+    dropped = []
+    if not include_past:
+        df, dropped = _drop_past_periods(df)
+
     return {
         "source": "10jqka",
         "symbol": symbol,
         "indicator": indicator,
+        "today": _today(),
+        "retrieved_at": _now_iso(),
         "found": True,
+        "dropped_past_periods": dropped,
         "data": _df_to_records(df),
     }
 
@@ -168,6 +256,9 @@ _ET_DEFAULT_INDICATOR = "综合盈利预测"
 def forecast_hk(
     symbol: str,
     indicator: str = Query(_ET_DEFAULT_INDICATOR, description=f"Один из: {_ET_INDICATORS}"),
+    include_past: bool = Query(
+        False, description="true — вернуть также прогнозы на уже прошедшие финансовые годы"
+    ),
     authorization: Optional[str] = Header(default=None),
 ):
     """
@@ -187,16 +278,25 @@ def forecast_hk(
             "source": "etnet",
             "symbol": hk_symbol,
             "indicator": indicator,
+            "today": _today(),
+            "retrieved_at": _now_iso(),
             "found": False,
             "note": "не найдено — нет покрытия аналитиками либо неверный код",
             "data": [],
         }
 
+    dropped = []
+    if not include_past:
+        df, dropped = _drop_past_periods(df)
+
     return {
         "source": "etnet",
         "symbol": hk_symbol,
         "indicator": indicator,
+        "today": _today(),
+        "retrieved_at": _now_iso(),
         "found": True,
+        "dropped_past_periods": dropped,
         "data": _df_to_records(df),
     }
 
@@ -231,6 +331,9 @@ def forecast_aggregate(
     hk_symbol: Optional[str] = Query(
         None, description="Если у бумаги есть отдельный HK-код, отличный от symbol"
     ),
+    include_past: bool = Query(
+        False, description="true — вернуть также прогнозы на уже прошедшие годы"
+    ),
     authorization: Optional[str] = Header(default=None),
 ):
     """
@@ -243,18 +346,28 @@ def forecast_aggregate(
         symbol уже гонконгский, напр. "0939").
     """
     check_auth(authorization)
-    results = {"symbol": symbol, "sources": {}}
+    results = {
+        "symbol": symbol,
+        "today": _today(),
+        "retrieved_at": _now_iso(),
+        "sources": {},
+    }
 
     is_a_share_like = symbol.isdigit() and len(symbol) == 6
 
     if is_a_share_like:
         try:
-            results["sources"]["eastmoney"] = forecast_em(symbol, authorization)
+            results["sources"]["eastmoney"] = forecast_em(
+                symbol, include_past=include_past, authorization=authorization
+            )
         except (UpstreamError, HTTPException) as e:
             results["sources"]["eastmoney"] = _source_error(e)
         try:
             results["sources"]["10jqka"] = forecast_ths(
-                symbol, indicator=_THS_DEFAULT_INDICATOR, authorization=authorization
+                symbol,
+                indicator=_THS_DEFAULT_INDICATOR,
+                include_past=include_past,
+                authorization=authorization,
             )
         except (UpstreamError, HTTPException) as e:
             results["sources"]["10jqka"] = _source_error(e)
@@ -263,7 +376,10 @@ def forecast_aggregate(
     if hk_code:
         try:
             results["sources"]["etnet"] = forecast_hk(
-                hk_code, indicator=_ET_DEFAULT_INDICATOR, authorization=authorization
+                hk_code,
+                indicator=_ET_DEFAULT_INDICATOR,
+                include_past=include_past,
+                authorization=authorization,
             )
         except (UpstreamError, HTTPException) as e:
             results["sources"]["etnet"] = _source_error(e)
