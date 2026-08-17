@@ -1,0 +1,36 @@
+name: Trigger Render deploy
+
+# Автодеплой Render через GitHub App иногда молча пропускает пуши: 17.08.2026
+# два коммита подряд (aac5f83, d42124e) не вызвали сборку при включённом
+# Auto-Deploy = On Commit, и прод остался на предыдущей версии. Этот воркфлоу
+# дублирует триггер явным вызовом Deploy Hook, чтобы выкатка не зависела от
+# доставки события со стороны Render.
+#
+# Требует секрет RENDER_DEPLOY_HOOK (Settings -> Secrets and variables ->
+# Actions) со значением из Render: Settings -> Deploy -> Deploy Hook.
+# Пока секрет не задан, шаг деплоя пропускается — воркфлоу не падает и не
+# шумит красными прогонами.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK не задан — деплой не запущен."
+            exit 0
+          fi
+          status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "$HOOK")
+          echo "Deploy hook HTTP status: $status"
+          if [ "$status" != "200" ] && [ "$status" != "201" ]; then
+            echo "::error::Deploy hook вернул HTTP $status"
+            exit 1
+          fi
