@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 from datetime import datetime, timezone
@@ -112,6 +113,52 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/auth_check")
+def auth_check(authorization: Optional[str] = Header(default=None)):
+    """
+    Диагностика авторизации без раскрытия секрета. Отвечает на единственный
+    вопрос, который иначе не отличить по коду 401: заголовок вообще не дошёл
+    или дошёл, но с другим значением.
+
+    Наружу отдаётся только то, что клиент прислал сам (длина и отпечаток
+    предъявленного токена) плюс булев результат сравнения. Ожидаемое значение,
+    его длина и его отпечаток не возвращаются никогда — иначе эндпоинт стал бы
+    оракулом для подбора.
+    """
+    result = {
+        "header_received": authorization is not None,
+        "scheme": None,
+        "token_length": None,
+        "token_fingerprint": None,
+        "has_surrounding_whitespace": None,
+        "match": False,
+        "server_key_configured": bool(PROXY_ACCESS_KEY),
+    }
+
+    if authorization is None:
+        result["hint"] = "Заголовок Authorization не пришёл вовсе — проблема в настройке Action, а не в значении токена."
+        return result
+
+    parts = authorization.split(" ", 1)
+    result["scheme"] = parts[0] if len(parts) == 2 else "(без схемы)"
+    token = parts[1] if len(parts) == 2 else authorization
+    result["token_length"] = len(token)
+    result["has_surrounding_whitespace"] = token != token.strip()
+    result["token_fingerprint"] = hashlib.sha256(token.encode()).hexdigest()[:8]
+    result["match"] = bool(PROXY_ACCESS_KEY) and authorization == f"Bearer {PROXY_ACCESS_KEY}"
+
+    if result["match"]:
+        result["hint"] = "Токен совпадает — защищённые эндпоинты должны отвечать 200."
+    elif result["scheme"] != "Bearer":
+        result["hint"] = f"Схема '{result['scheme']}' вместо 'Bearer' — в настройке Action выбран не тот тип авторизации."
+    elif result["has_surrounding_whitespace"]:
+        result["hint"] = "В значении токена есть пробел или перевод строки по краям — скорее всего прилип при копировании."
+    else:
+        result["hint"] = "Заголовок дошёл, схема верная, но значение не совпадает с PROXY_ACCESS_KEY на сервере."
+
+    return result
 
 
 @app.get("/income")

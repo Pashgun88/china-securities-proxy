@@ -23,6 +23,41 @@ paths:
                 properties:
                   status:
                     type: string
+  /auth_check:
+    get:
+      operationId: getAuthCheck
+      summary: >-
+        Диагностика авторизации: дошёл ли заголовок Authorization и совпадает
+        ли токен. Секрет не раскрывает. Вызывать только по прямой просьбе.
+      responses:
+        "200":
+          description: Состояние авторизации текущего запроса
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  header_received:
+                    type: boolean
+                    description: Дошёл ли заголовок Authorization вообще
+                  scheme:
+                    type: string
+                    description: Схема авторизации, ожидается Bearer
+                  token_length:
+                    type: integer
+                  token_fingerprint:
+                    type: string
+                    description: Первые 8 символов sha256 предъявленного токена
+                  has_surrounding_whitespace:
+                    type: boolean
+                  match:
+                    type: boolean
+                    description: Совпал ли токен с ключом на сервере
+                  server_key_configured:
+                    type: boolean
+                  hint:
+                    type: string
+                    description: Человекочитаемый вывод — процитируй его дословно
   /date:
     get:
       operationId: getServerDate
