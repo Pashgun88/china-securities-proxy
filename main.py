@@ -94,6 +94,21 @@ def call_akshare(func, **kwargs):
     return call_akshare_with_retry(func, **kwargs)
 
 
+@app.head("/", include_in_schema=False)
+@app.get("/")
+def root():
+    """
+    Корень отдаёт краткую справку вместо 404. Клиенты (в т.ч. рантайм GPT
+    Actions) иногда пробуют базовый URL до вызова конкретной операции, и
+    404 на нём выглядит как недоступность всего сервиса.
+    """
+    return {"service": "China Securities Data Proxy", "docs": "/docs", "health": "/health"}
+
+
+# GET и HEAD: на HEAD Starlette сам не отвечает, отдаёт 405 — а HEAD-проба
+# перед реальным запросом это обычное поведение HTTP-клиентов, и 405 на ней
+# неотличим от отказа сервиса.
+@app.head("/health", include_in_schema=False)
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -257,6 +272,7 @@ def stock_basic(ts_code: str = Query(...), authorization: Optional[str] = Header
     return df_response(df)
 
 
+@app.head("/date", include_in_schema=False)
 @app.get("/date")
 def server_date():
     """
