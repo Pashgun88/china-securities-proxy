@@ -713,6 +713,121 @@ paths:
                 properties:
                   detail:
                     type: string
+  /forecast/hk_brokers/{symbol}:
+    get:
+      operationId: getForecastHkBrokers
+      summary: >-
+        Индивидуальные прогнозы брокеров по гонконгской акции (ET Net):
+        кто, когда и какой именно прогноз дал — брокер, дата обновления,
+        финансовый год, чистая прибыль, EPS, DPS, рейтинг, целевая цена.
+        Используй его вместо /forecast/hk везде, где важно происхождение
+        прогноза, а не обезличенный консенсус.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код HKEX без .HK, ведущие нули не обязательны (напр. "1810",
+            "01810").
+          schema:
+            type: string
+        - name: max_age_days
+          in: query
+          required: false
+          description: >-
+            Базовое окно свежести прогнозов в днях (по умолчанию 30). Если
+            уникальных брокеров в этом окне меньше min_brokers, сервис сам
+            расширяет окно и возвращает фактически применённое в
+            window_used_days.
+          schema:
+            type: integer
+            default: 30
+        - name: min_brokers
+          in: query
+          required: false
+          description: >-
+            Сколько уникальных брокеров должно набраться в окне (по умолчанию
+            10). Считаются именно брокеры, а не строки: один дом даёт по
+            строке на каждый финансовый год.
+          schema:
+            type: integer
+            default: 10
+        - name: include_past
+          in: query
+          required: false
+          description: >-
+            По умолчанию false — прогнозы на уже прошедшие финансовые годы
+            отфильтровываются.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: >-
+            Таблица индивидуальных прогнозов брокеров с разметкой выбросов
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  symbol:
+                    type: string
+                  today:
+                    type: string
+                    description: >-
+                      Сегодняшняя дата по часам сервера (YYYY-MM-DD). Считай
+                      её текущей датой, а не ту, что модель помнит сама.
+                  retrieved_at:
+                    type: string
+                  found:
+                    type: boolean
+                  window_used_days:
+                    type: integer
+                    nullable: true
+                    description: >-
+                      Фактически применённое окно свежести в днях. null —
+                      окно не ограничивалось, взято всё доступное. Всегда
+                      сообщай это значение пользователю.
+                  requested_max_age_days:
+                    type: integer
+                  min_brokers:
+                    type: integer
+                  brokers_count:
+                    type: integer
+                    description: Уникальных брокеров в выдаче
+                  rows_count:
+                    type: integer
+                  coverage_exhausted:
+                    type: boolean
+                    description: >-
+                      true — покрытия не хватает даже без ограничения по дате
+                      (аналитиков по бумаге физически меньше min_brokers).
+                      Это не ошибка: данные валидны, но консенсус узкий, и об
+                      этом нужно прямо предупредить пользователя.
+                  dropped_past_periods:
+                    type: array
+                    items:
+                      type: string
+                  data:
+                    type: array
+                    description: >-
+                      Строки: 财政年度 (FY), 纯利/亏损 (чистая прибыль),
+                      每股盈利 (EPS), 每股派息 (DPS), 证券商 (брокер),
+                      评级 (рейтинг), 目标价 (целевая цена), 更新日期 (дата
+                      прогноза), is_outlier (признак выброса).
+                    items:
+                      type: object
+        "502":
+          description: Ошибка при обращении к источнику данных (AKShare)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
   /forecast/aggregate/{symbol}:
     get:
       operationId: getForecastAggregate

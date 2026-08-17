@@ -41,6 +41,7 @@ docker run -p 8000:8000 -e PROXY_ACCESS_KEY=mysecret china-securities-proxy
 | Метод | Путь | Описание |
 |---|---|---|
 | GET | /health | проверка живости |
+| GET | /date | текущая дата сервера (нужна GPT: своих часов у модели нет) |
 | GET | /income | отчёт о прибылях и убытках (A-share) |
 | GET | /balancesheet | баланс (A-share) |
 | GET | /cashflow | движение денежных средств (A-share) |
@@ -51,7 +52,41 @@ docker run -p 8000:8000 -e PROXY_ACCESS_KEY=mysecret china-securities-proxy
 | GET | /fx | курс валюты к CNY (Bank of China) |
 | GET | /fx_cny_hkd_on_date | курс CNY/HKD на конкретную дату (BOC) |
 | GET | /stock_basic | базовая информация о тикере |
+| GET | /forecast/em/{symbol} | прогноз консенсуса Eastmoney (A-share) |
+| GET | /forecast/ths/{symbol} | прогноз консенсуса Tonghuashun/同花顺 (A-share) |
+| GET | /forecast/hk/{symbol} | прогноз консенсуса ET Net/经济通 (HK) |
+| GET | /forecast/hk_brokers/{symbol} | индивидуальные прогнозы брокеров ET Net (HK) — брокер, дата, FY, EPS, DPS, TP, рейтинг |
+| GET | /forecast/aggregate/{symbol} | все применимые источники прогнозов за один вызов |
 | GET | /consensus/aastocks/{symbol} | консенсус-прогнозы брокеров (HK), парсинг AASTOCKS.com — **manual/low-frequency use only** |
+
+Подробности по прогнозам — фильтр актуальности, окно свежести, разметка
+выбросов — см. [FORECAST_NOTES.md](FORECAST_NOTES.md).
+
+### /forecast/hk_brokers/{symbol}
+
+Отвечает на вопрос «кто и когда дал прогноз», в отличие от обезличенного
+консенсуса `/forecast/hk`. Источник — индикатор ET Net `盈利预测概览`.
+
+```bash
+curl "http://localhost:8000/forecast/hk_brokers/01810?max_age_days=30&min_brokers=10"
+```
+
+Окно свежести: берётся `max_age_days`; если уникальных брокеров меньше
+`min_brokers` — окно расширяется по ступеням (60/90/180/365 дней), и
+фактически применённое возвращается в `window_used_days`. Считаются именно
+уникальные брокеры, а не строки: один дом даёт по строке на каждый
+финансовый год, поэтому по строкам порог набирается ложно.
+
+Если покрытия не хватает даже без ограничения по дате, ответ содержит
+`coverage_exhausted: true` — данные при этом отдаются полностью. Так, у
+Bank of China 3988 аналитиков всего 8, и десять не наберётся ни при каком
+окне; пустой ответ здесь был бы бесполезен.
+
+Поле `is_outlier` помечает прогнозы, статистически выбивающиеся из
+остальных (отклонение от среднего более чем вдвое больше следующего по
+величине, отдельно внутри каждого финансового года). Строки не удаляются:
+списка «надёжных» домов у сервиса нет, поэтому решение принимает человек —
+имя брокера и дата есть в каждой строке.
 
 ### /consensus/aastocks/{symbol}
 
@@ -65,4 +100,18 @@ docstring в [broker_consensus.py](broker_consensus.py).
 
 ## Деплой
 
-Инструкции по деплою на Render.com — см. сообщение ассистента / историю чата.
+Сервис задеплоен на Render.com (`https://china-securities-proxy.onrender.com`)
+с автодеплоем из ветки `main` — push в `main` запускает пересборку образа
+сам, вручную ничего нажимать не нужно. Сборка идёт по [Dockerfile](Dockerfile);
+новые модули обязательно добавлять в строку `COPY`, иначе контейнер упадёт
+с `ModuleNotFoundError` уже на старте.
+
+`PROXY_ACCESS_KEY` задаётся в переменных окружения Render и в репозиторий не
+попадает. `/health` и `/date` намеренно оставлены без авторизации — первый
+нужен воркфлоу прогрева [keep-warm.yml](.github/workflows/keep-warm.yml)
+(free tier усыпляет сервис после простоя), второй ничего чувствительного не
+отдаёт.
+
+После изменения [openapi_schema.yaml](openapi_schema.yaml) схему нужно
+переимпортировать в кастомный GPT вручную — см. раздел в
+[FORECAST_NOTES.md](FORECAST_NOTES.md).

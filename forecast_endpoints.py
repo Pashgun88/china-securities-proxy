@@ -16,7 +16,7 @@ forecast_endpoints.py
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 import akshare as ak
@@ -58,10 +58,18 @@ def _current_year() -> int:
     return datetime.now(timezone.utc).year
 
 
+def _to_jsonable(value):
+    # ET Net отдаёт 更新日期 объектами date — json.dumps на них падает, поэтому
+    # приводим любые даты/таймстемпы к ISO-строке до сериализации.
+    if isinstance(value, (datetime, date, pd.Timestamp)):
+        return value.isoformat()
+    return value
+
+
 def _df_to_records(df: pd.DataFrame) -> list:
     df = df.astype(object).where(df.notnull(), None)
     df = df.replace([float("inf"), float("-inf")], None)
-    return df.to_dict(orient="records")
+    return [{k: _to_jsonable(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
 
 
 # Год в ответах источников встречается в двух видах, поэтому фильтруем оба:
@@ -296,6 +304,140 @@ def forecast_hk(
         "today": _today(),
         "retrieved_at": _now_iso(),
         "found": True,
+        "dropped_past_periods": dropped,
+        "data": _df_to_records(df),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 3a. Индивидуальные брокерские прогнозы (ET Net 盈利预测概览)
+# ---------------------------------------------------------------------------
+#
+# В отличие от 综合盈利预测 (агрегат без имён), этот индикатор даёт provenance:
+# по каждой строке видно, какой дом, когда и что именно спрогнозировал —
+#   财政年度 | 纯利/亏损 | 每股盈利 | 每股派息 | 证券商 | 评级 | 目标价 | 更新日期
+# Именно это нужно, чтобы не работать с обезличенным консенсусом.
+
+_BROKER_INDICATOR = "盈利预测概览"
+_COL_BROKER = "证券商"
+_COL_DATE = "更新日期"
+_COL_FY = "财政年度"
+_COL_EPS = "每股盈利"
+
+# Ступени расширения окна, если в базовом окне не набралось min_brokers.
+_WINDOW_LADDER_DAYS = [60, 90, 180, 365]
+
+# Меньше трёх точек — разброс считать не на чем: любое из двух значений
+# формально «вдвое дальше» второго, и разметка выбросов теряет смысл.
+_MIN_POINTS_FOR_OUTLIERS = 3
+
+
+def _mark_outliers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Размечает выбросы по правилу заказчика, отдельно внутри каждого финансового
+    года: прогноз считается выбросом, если его отклонение от среднего более чем
+    вдвое превышает следующее по величине отклонение среди остальных.
+
+    Строки НЕ удаляются: whitelist «известных домов» отсутствует, поэтому
+    решение, учитывать ли выброс, принимает человек — у него в строке есть имя
+    брокера и дата.
+    """
+    df = df.copy()
+    df["is_outlier"] = False
+    if _COL_EPS not in df.columns or _COL_FY not in df.columns:
+        return df
+
+    for fy, group in df.groupby(_COL_FY):
+        eps = pd.to_numeric(group[_COL_EPS], errors="coerce").dropna()
+        if len(eps) < _MIN_POINTS_FOR_OUTLIERS:
+            continue
+        deviations = (eps - eps.mean()).abs().sort_values(ascending=False)
+        top, runner_up = deviations.iloc[0], deviations.iloc[1]
+        if runner_up > 0 and top > 2 * runner_up:
+            df.loc[deviations.index[0], "is_outlier"] = True
+
+    return df
+
+
+@router.get("/hk_brokers/{symbol}")
+def forecast_hk_brokers(
+    symbol: str,
+    max_age_days: int = Query(30, ge=1, description="Базовое окно свежести прогнозов, дней"),
+    min_brokers: int = Query(
+        10, ge=1, description="Сколько уникальных брокеров должно набраться в окне"
+    ),
+    include_past: bool = Query(
+        False, description="true — оставить прогнозы на уже прошедшие финансовые годы"
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Индивидуальные прогнозы брокеров по гонконгской акции: кто, когда и какой
+    прогноз дал — в отличие от обезличенного консенсуса /forecast/hk.
+
+    Окно свежести: берём max_age_days; если уникальных брокеров меньше
+    min_brokers — расширяем окно по ступеням и в пределе берём всё, что есть.
+    Считаем именно уникальных брокеров, а не строки: один дом даёт по строке на
+    каждый финансовый год, и по строкам порог набирается ложно.
+
+    Если покрытия не хватает даже без ограничения по дате (у неликвидных имён
+    брокеров физически меньше десяти) — отдаём всё, что есть, с
+    coverage_exhausted: true. Пустой ответ вместо данных здесь бесполезен.
+    """
+    check_auth(authorization)
+    hk_symbol = symbol.zfill(5)
+    df = call_akshare_with_retry(
+        ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=_BROKER_INDICATOR
+    )
+
+    base = {
+        "source": "etnet",
+        "indicator": _BROKER_INDICATOR,
+        "symbol": hk_symbol,
+        "today": _today(),
+        "retrieved_at": _now_iso(),
+    }
+
+    if df is None or df.empty:
+        return {
+            **base,
+            "found": False,
+            "note": "не найдено — нет покрытия аналитиками либо неверный код",
+            "data": [],
+        }
+
+    dropped = []
+    if not include_past:
+        df, dropped = _drop_past_periods(df)
+
+    dates = pd.to_datetime(df[_COL_DATE], errors="coerce")
+    now = pd.Timestamp(datetime.now(timezone.utc).date())
+
+    window_used = None
+    coverage_exhausted = False
+    windows = [max_age_days] + [d for d in _WINDOW_LADDER_DAYS if d > max_age_days]
+    for days in windows:
+        # Строки с нераспознанной датой оставляем — потерять прогноз хуже, чем
+        # показать его без подтверждённой свежести (дата всё равно видна в строке).
+        keep = dates.isna() | (dates >= now - pd.Timedelta(days=days))
+        if df.loc[keep, _COL_BROKER].nunique() >= min_brokers:
+            df = df[keep]
+            window_used = days
+            break
+    else:
+        coverage_exhausted = df[_COL_BROKER].nunique() < min_brokers
+
+    df = _mark_outliers(df)
+
+    return {
+        **base,
+        "found": True,
+        "window_used_days": window_used,
+        "requested_max_age_days": max_age_days,
+        "min_brokers": min_brokers,
+        "brokers_count": int(df[_COL_BROKER].nunique()),
+        "rows_count": int(len(df)),
+        "coverage_exhausted": coverage_exhausted,
         "dropped_past_periods": dropped,
         "data": _df_to_records(df),
     }
