@@ -276,9 +276,13 @@ def server_date():
 @app.get("/consensus/aastocks/{symbol}")
 def consensus_aastocks(symbol: str, authorization: Optional[str] = Header(default=None)):
     """
-    Manual/low-frequency use only — not for automated polling. Парсит
-    research-заметки AASTOCKS.com по HK-тикеру (ожидается 1-2 запуска в год).
-    НЕ подключён к keep-warm workflow и не должен вызываться автоматически.
+    Свежие пересмотры прогнозов брокеров по HK-тикеру: парсит research-заметки
+    AASTOCKS.com. Это события пересмотра (рейтинг, целевая цена), а не таблица
+    абсолютных прогнозов по годам — дополняет /forecast/hk_brokers.
+
+    Не для автоматического опроса: НЕ подключён к keep-warm workflow и не
+    вызывается по расписанию, обращения к сайту ограничены кэшем на тикер и
+    суточным потолком (при исчерпании — 429). См. broker_consensus.py.
     """
     check_auth(authorization)
     return fetch_aastocks_consensus(symbol)
