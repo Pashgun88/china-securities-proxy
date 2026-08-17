@@ -786,8 +786,6 @@ paths:
                   found:
                     type: boolean
                   window_used_days:
-                    type: integer
-                    nullable: true
                     description: >-
                       Фактически применённое окно свежести в днях. null —
                       окно не ограничивалось, взято всё доступное. Всегда
