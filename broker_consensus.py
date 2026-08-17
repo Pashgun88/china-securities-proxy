@@ -287,6 +287,7 @@ def fetch_aastocks_consensus(symbol: str) -> dict:
     return {
         "source": "aastocks",
         "symbol": hk_symbol,
+        "today": datetime.now(timezone.utc).date().isoformat(),
         "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "found": bool(reports),
         "note": None if reports else "не найдено — нет research-заметок с рейтингом/TP на текущей странице новостей",
