@@ -57,7 +57,7 @@ docker run -p 8000:8000 -e PROXY_ACCESS_KEY=mysecret china-securities-proxy
 | GET | /forecast/hk/{symbol} | прогноз консенсуса ET Net/经济通 (HK) |
 | GET | /forecast/hk_brokers/{symbol} | индивидуальные прогнозы брокеров ET Net (HK) — брокер, дата, FY, EPS, DPS, TP, рейтинг |
 | GET | /forecast/aggregate/{symbol} | все применимые источники прогнозов за один вызов |
-| GET | /consensus/aastocks/{symbol} | консенсус-прогнозы брокеров (HK), парсинг AASTOCKS.com — **manual/low-frequency use only** |
+| GET | /consensus/aastocks/{symbol} | свежие пересмотры прогнозов брокеров (HK), парсинг AASTOCKS.com — **троттлится** |
 
 Подробности по прогнозам — фильтр актуальности, окно свежести, разметка
 выбросов — см. [FORECAST_NOTES.md](FORECAST_NOTES.md).
@@ -90,13 +90,29 @@ Bank of China 3988 аналитиков всего 8, и десять не на�
 
 ### /consensus/aastocks/{symbol}
 
-Manual/low-frequency use only — not for automated polling. Респектует ToS
-AASTOCKS.com тем, что ограничивается редкими ручными запросами (ожидается
-1-2 запуска в год на несколько тикеров), а не постоянным опросом. Не
-подключён к keep-warm workflow (`.github/workflows/keep-warm.yml`) и не
-вызывается автоматически ни одним другим эндпоинтом или воркфлоу проекта —
-запускать только вручную. Подробности парсинга и его ограничения — см.
-docstring в [broker_consensus.py](broker_consensus.py).
+Отвечает на вопрос «что аналитики поменяли за последние дни»: рейтинг и
+целевая цена из research-заметок AASTOCKS.com. Это **события пересмотра**, а
+не таблица абсолютных прогнозов по годам — дополняет `/forecast/hk_brokers`,
+а не заменяет его.
+
+Официального API у источника нет, страницы парсятся, поэтому нагрузка
+ограничивается осознанно: кэш на тикер (6 часов), суточный потолок живых
+обходов (20, при исчерпании — `429`), пауза между статьями внутри обхода.
+Не подключён к keep-warm workflow (`.github/workflows/keep-warm.yml`) и не
+вызывается по расписанию — только в ответ на живой запрос пользователя.
+
+Извлечение эвристическое: имя брокера, рейтинг и TP берутся из заголовка
+заметки (`Nomura Raises TENCENT TP from HKD650 to HKD690, Maintains
+Neutral` → `Nomura` / `Buy`-`Neutral` / `650 -> 690`), недостающее
+добирается из текста статьи. В каждой записи возвращаются `headline`,
+`raw_snippet` и `source_url` — по ним результат можно проверить. Подробности
+и ограничения — docstring в [broker_consensus.py](broker_consensus.py).
+
+Проверить парсинг на текущей вёрстке сайта:
+
+```bash
+python3 test_aastocks_consensus.py   # живые запросы, 3 тикера
+```
 
 ## Деплой
 

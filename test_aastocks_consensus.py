@@ -7,8 +7,8 @@ test_aastocks_consensus.py
 
     python3 test_aastocks_consensus.py
 
-Не тест в смысле pytest/CI — намеренно, см. предупреждение в
-broker_consensus.py про manual/low-frequency use only.
+Не тест в смысле pytest/CI — намеренно: он ходит на живой сайт, а тот
+троттлится (кэш + суточный потолок), поэтому в CI ему делать нечего.
 """
 
 import json

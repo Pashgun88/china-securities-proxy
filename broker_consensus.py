@@ -3,14 +3,23 @@ broker_consensus.py
 
 Разовый парсер консенсус-прогнозов брокеров с AASTOCKS.com для HK-тикеров.
 
-ВАЖНО — Manual/low-frequency use only, not for automated polling.
-Этот модуль/эндпоинт НЕ подключён к keep-warm workflow и не вызывается
-автоматически другими частями системы — только по прямому ручному запросу
-(ожидается 1-2 запуска в год на несколько тикеров). AASTOCKS не публикует
-официального API для этих данных; страницы парсятся через BeautifulSoup.
-Соблюдаем ToS сайта тем, что ограничиваемся редкими ручными запросами, а не
-постоянным опросом. Если частота использования вырастет — это нужно
-пересмотреть отдельно (лицензировать данные или найти официальный источник).
+ВАЖНО — интерактивный, но троттлящийся источник, не для автоматического опроса.
+AASTOCKS не публикует официального API для этих данных; страницы парсятся
+через BeautifulSoup, поэтому нагрузка на сайт ограничивается осознанно:
+
+  - модуль НЕ подключён к keep-warm workflow и не вызывается по расписанию
+    ни одной частью системы — только в ответ на живой запрос пользователя;
+  - кэш на тикер (_CACHE_TTL_SECONDS): повторные вопросы про одну и ту же
+    бумагу до сайта не доходят вообще;
+  - суточный потолок живых обходов (_DAILY_FETCH_BUDGET), при исчерпании —
+    429, а не тихое продолжение опроса;
+  - пауза REQUEST_DELAY_SECONDS между статьями внутри одного обхода.
+
+Изначально эндпоинт был помечен manual-only (1-2 запуска в год); после
+подключения к GPT частота определяется вопросами пользователя, и именно
+поэтому появились кэш и потолок. Если и этого перестанет хватать — вопрос
+нужно решать не поднятием лимита, а лицензированием данных или переходом
+на официальный источник.
 
 Формат страниц AASTOCKS не документирован и может измениться в любой момент —
 парсинг это учитывает: сбои извлечения (TypeError/KeyError/IndexError/
@@ -50,6 +59,35 @@ HEADERS = {
 
 _PARSING_ERRORS = (TypeError, KeyError, IndexError, AttributeError)
 
+# Троттлинг. Эндпоинт вызывается из GPT, то есть частота определяется тем,
+# сколько вопросов задаст пользователь, а не расписанием. Чтобы это не
+# превращалось в поток обращений к AASTOCKS, режем в два слоя: кэш на тикер
+# (повторные вопросы про одну бумагу вообще не доходят до сайта) и жёсткий
+# суточный потолок на число живых обходов. Один обход — это листинг плюс по
+# запросу на каждую заметку, поэтому потолок считается в обходах, а не в
+# HTTP-запросах.
+_CACHE_TTL_SECONDS = 6 * 60 * 60
+_DAILY_FETCH_BUDGET = 20
+
+_cache: dict = {}
+_budget: dict = {"date": None, "count": 0}
+
+
+def _consume_budget() -> None:
+    today = datetime.now(timezone.utc).date().isoformat()
+    if _budget["date"] != today:
+        _budget["date"], _budget["count"] = today, 0
+    if _budget["count"] >= _DAILY_FETCH_BUDGET:
+        raise UpstreamError(
+            "rate_limited",
+            429,
+            f"Суточный лимит обращений к AASTOCKS исчерпан ({_DAILY_FETCH_BUDGET} тикеров). "
+            "Данные по уже запрошенным тикерам продолжают отдаваться из кэша; "
+            "новые тикеры будут доступны после полуночи UTC.",
+            True,
+        )
+    _budget["count"] += 1
+
 
 def _normalize_hk_symbol(symbol: str) -> str:
     code = symbol.strip().upper()
@@ -66,17 +104,100 @@ def _http_get(url: str) -> str:
     return call_akshare_with_retry(_do_get)
 
 
+# Заголовок research-заметки AASTOCKS почти всегда несёт всё нужное сам:
+#   "Daiwa Slightly Trims XIAOMI-W TP to HKD32, Reiterates Buy"
+#   "BofAS Ratings, TPs on H-Share CN Banks (Table)"
+#   "G Sachs: Large CN Banks Remain Top Picks"
+# То есть имя дома стоит первым и отделено от остального либо двоеточием,
+# либо глаголом действия. Разбирать структурно надёжнее, чем брать два первых
+# слова: у "Daiwa Slightly Trims..." так получалось имя брокера "Daiwa Slightly".
+_ACTION_WORDS = {
+    "cuts", "trims", "slashes", "reduces", "lowers", "raises", "lifts", "hikes",
+    "boosts", "upgrades", "downgrades", "reiterates", "maintains", "keeps",
+    "initiates", "resumes", "starts", "says", "forecasts", "expects", "sees",
+    "foresees", "prefers", "favors", "favours", "recommends", "believes",
+    "estimates", "projects", "ratings", "points", "remains", "turns",
+}
+
+_RATING_WORDS = [
+    "Outperform", "Underperform", "Overweight", "Underweight", "Accumulate",
+    "Neutral", "Buy", "Sell", "Hold", "Reduce", "Add",
+]
+_RATING_RE = re.compile(r"\b(%s)\b" % "|".join(_RATING_WORDS), re.I)
+
+_CURRENCY = r"(?:HKD|HK\$|RMB|CNY|USD|US\$)?"
+_TP_FROM_TO_RE = re.compile(
+    r"TPs?\s+from\s*%s\s*(\d+(?:\.\d+)?)\s*(?:to|->)\s*%s\s*(\d+(?:\.\d+)?)" % (_CURRENCY, _CURRENCY),
+    re.I,
+)
+_TP_TO_RE = re.compile(r"TPs?\s+(?:to|at)\s*%s\s*(\d+(?:\.\d+)?)" % _CURRENCY, re.I)
+_TP_CURRENCY_RE = re.compile(r"\b(HKD|HK\$|RMB|CNY|USD|US\$)\s*\d", re.I)
+
+
+def _clean_broker(name: str) -> str:
+    # "HSBC Research's Top Picks..." — притяжательное окончание в имя дома не входит.
+    return re.sub(r"['’]s$", "", name.strip(" ,:"))
+
+
 def _guess_broker(headline: str) -> str:
     """
-    Эвристика: заголовки часто вида "<Broker>: <suть>" или "<Broker> <Verb> ...".
-    Не гарантирует точность на 100% — сверяйте с полем headline вручную.
+    Имя брокера — всё, что стоит до двоеточия либо до первого глагола действия.
+    Хвостовые наречия ("Slightly") отбрасываем: они относятся к действию, а не
+    к названию дома. Точность не гарантируется — сверяйте с полем headline.
     """
-    if ":" in headline:
-        candidate = headline.split(":", 1)[0].strip()
+    head = headline.strip()
+    if ":" in head:
+        candidate = head.split(":", 1)[0].strip()
         if 0 < len(candidate) <= 30:
-            return candidate
-    words = headline.split()
-    return " ".join(words[:2]) if words else headline
+            return _clean_broker(candidate)
+
+    words = head.split()
+    collected = []
+    for word in words:
+        if re.sub(r"[^A-Za-z]", "", word).lower() in _ACTION_WORDS:
+            break
+        collected.append(word)
+        # Страховка от заголовков без распознанного глагола: имя дома — это
+        # одно-два слова ("G Sachs", "BofAS"), а не половина предложения.
+        if len(collected) >= 4:
+            return _clean_broker(" ".join(words[:2]))
+
+    while collected and collected[-1].lower().endswith("ly"):
+        collected.pop()
+
+    if collected:
+        return _clean_broker(" ".join(collected))
+    return _clean_broker(" ".join(words[:2])) if words else headline
+
+
+def _extract_from_headline(headline: str) -> dict:
+    """
+    Достаёт рейтинг и целевую цену прямо из заголовка. Это чаще срабатывает,
+    чем разбор текста статьи: в заголовке данные стоят в фиксированной форме,
+    а в теле встречаются в свободном пересказе.
+    """
+    tp_old = tp_new = None
+    match = _TP_FROM_TO_RE.search(headline)
+    if match:
+        tp_old, tp_new = float(match.group(1)), float(match.group(2))
+    else:
+        match = _TP_TO_RE.search(headline)
+        if match:
+            tp_new = float(match.group(1))
+
+    currency = None
+    currency_match = _TP_CURRENCY_RE.search(headline)
+    if tp_new is not None and currency_match:
+        currency = currency_match.group(1).upper().replace("$", "D")
+
+    ratings = _RATING_RE.findall(headline)
+
+    return {
+        "rating": ratings[-1] if ratings else None,
+        "target_price_old": tp_old,
+        "target_price_new": tp_new,
+        "target_price_currency": currency,
+    }
 
 
 def _extract_table_row(text: str, hk_symbol: str):
@@ -184,19 +305,28 @@ def _parse_article(html: str, hk_symbol: str, headline: str, source_url: str, da
     # rating/TP как часть содержательного текста.
     text = re.sub(r"\([^()]*(?:quote is delayed|Short Selling Data)[^()]*\)", "", text, flags=re.I)
 
-    extracted = _extract_table_row(text, hk_symbol) or _extract_prose(text, hk_symbol)
-    if extracted is None:
+    extracted = _extract_table_row(text, hk_symbol) or _extract_prose(text, hk_symbol) or {}
+    from_headline = _extract_from_headline(headline)
+
+    # Тело статьи приоритетнее (там разбор по конкретному тикеру), но пустые
+    # поля добираем из заголовка — иначе заметка вида "JPM Cuts TP to HKD31"
+    # возвращалась с rating/TP = null при том, что данные видны в заголовке.
+    merged = {
+        key: extracted.get(key) if extracted.get(key) is not None else from_headline.get(key)
+        for key in ("rating", "target_price_old", "target_price_new")
+    }
+    merged["target_price_currency"] = from_headline.get("target_price_currency")
+
+    if all(value is None for value in merged.values()):
         return None
 
     return {
         "broker": _guess_broker(headline),
         "headline": headline,
-        "rating": extracted["rating"],
-        "target_price_old": extracted["target_price_old"],
-        "target_price_new": extracted["target_price_new"],
+        **merged,
         "date": date,
         "source_url": source_url,
-        "raw_snippet": extracted["raw_snippet"],
+        "raw_snippet": extracted.get("raw_snippet", text[:400]),
     }
 
 
@@ -253,10 +383,23 @@ def _list_research_articles(hk_symbol: str) -> list:
 def fetch_aastocks_consensus(symbol: str) -> dict:
     """
     Собирает консенсус-прогнозы брокеров по HK-тикеру с новостной ленты
-    AASTOCKS ("<Research>..." заметки на странице stock-aafn). Ручной,
-    низкочастотный инструмент — см. предупреждение в начале модуля.
+    AASTOCKS ("<Research>..." заметки на странице stock-aafn).
+
+    Обращения к сайту ограничены кэшем и суточным потолком — см. блок
+    троттлинга в начале модуля.
     """
     hk_symbol = _normalize_hk_symbol(symbol)
+
+    now = time.time()
+    cached = _cache.get(hk_symbol)
+    if cached is not None and (now - cached["ts"]) < _CACHE_TTL_SECONDS:
+        return {
+            **cached["payload"],
+            "cached": True,
+            "cache_age_seconds": int(now - cached["ts"]),
+        }
+
+    _consume_budget()
     articles = _list_research_articles(hk_symbol)
 
     reports = []
@@ -284,7 +427,7 @@ def fetch_aastocks_consensus(symbol: str) -> dict:
         if report is not None:
             reports.append(report)
 
-    return {
+    payload = {
         "source": "aastocks",
         "symbol": hk_symbol,
         "today": datetime.now(timezone.utc).date().isoformat(),
@@ -293,3 +436,5 @@ def fetch_aastocks_consensus(symbol: str) -> dict:
         "note": None if reports else "не найдено — нет research-заметок с рейтингом/TP на текущей странице новостей",
         "data": reports,
     }
+    _cache[hk_symbol] = {"payload": payload, "ts": now}
+    return {**payload, "cached": False, "cache_age_seconds": 0}

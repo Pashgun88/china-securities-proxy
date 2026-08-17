@@ -901,10 +901,13 @@ paths:
     get:
       operationId: getConsensusAastocks
       summary: >-
-        Manual/low-frequency use only — не для автоматического опроса.
-        Консенсус-прогнозы брокеров (rating, target price) по HK-тикеру,
-        собранные из research-заметок AASTOCKS.com. Ожидается 1-2 запуска
-        в год на несколько тикеров, не подключён к keep-warm пингу.
+        Свежие пересмотры прогнозов брокеров по HK-тикеру из research-заметок
+        AASTOCKS.com: кто и как поменял рейтинг и целевую цену за последние
+        дни. Дополняет /forecast/hk_brokers, а не заменяет его — здесь
+        события пересмотра, а не таблица абсолютных прогнозов по годам.
+        Источник троттлится (кэш на тикер + суточный потолок обращений):
+        вызывай только по прямому вопросу об изменениях прогнозов, а не при
+        каждом запросе прогнозных данных.
       parameters:
         - name: symbol
           in: path
@@ -945,6 +948,14 @@ paths:
                     type: boolean
                   note:
                     type: string
+                  cached:
+                    type: boolean
+                    description: >-
+                      true — ответ отдан из кэша, живого обращения к AASTOCKS
+                      не было. Датой данных в этом случае считай retrieved_at,
+                      а не текущий момент.
+                  cache_age_seconds:
+                    type: integer
                   data:
                     type: array
                     items:
@@ -960,12 +971,32 @@ paths:
                           type: number
                         target_price_new:
                           type: number
+                        target_price_currency:
+                          type: string
                         date:
                           type: string
                         source_url:
                           type: string
                         raw_snippet:
                           type: string
+        "429":
+          description: >-
+            Суточный лимит обращений к AASTOCKS исчерпан. Не повторяй запрос
+            и не пытайся обойти лимит: скажи пользователю, что источник
+            пересмотров сегодня недоступен, и работай по /forecast/hk_brokers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: boolean
+                  error_type:
+                    type: string
+                  message:
+                    type: string
+                  retryable:
+                    type: boolean
         "502":
           description: Сбой апстрима (сеть) или изменение структуры страницы AASTOCKS
           content:
