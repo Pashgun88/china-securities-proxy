@@ -47,6 +47,28 @@ class NormalizePathMiddleware:
                 # рассинхрон между ними ломает построение url в ответах.
                 if scope.get("raw_path") is not None:
                     scope["raw_path"] = normalized.encode("latin-1")
+
+            # Голый OPTIONS (без CORS-заголовков) не попадает в CORSMiddleware
+            # и доходит до роутера, а тот отдаёт 405: метод для этого пути не
+            # объявлен. Для клиента это очередной non-2xx, неотличимый от
+            # отказа сервиса. Preflight с Origin по-прежнему обрабатывает
+            # CORSMiddleware — он снаружи и до сюда такой запрос не доводит.
+            if scope.get("method") == "OPTIONS":
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 204,
+                        "headers": [
+                            (b"allow", b"GET, HEAD, OPTIONS"),
+                            (b"access-control-allow-origin", b"*"),
+                            (b"access-control-allow-headers", b"*"),
+                            (b"access-control-allow-methods", b"GET, HEAD, OPTIONS"),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b""})
+                return
+
         await self.app(scope, receive, send)
 
 
