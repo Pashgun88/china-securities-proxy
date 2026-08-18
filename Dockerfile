@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py forecast_endpoints.py errors.py broker_consensus.py .
+COPY main.py forecast_endpoints.py errors.py broker_consensus.py market_estimates.py .
 
 ENV PORT=8000
 EXPOSE 8000

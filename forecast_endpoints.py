@@ -11,6 +11,13 @@ forecast_endpoints.py
   /forecast/ths/{symbol}       -> Tonghuashun / 同花顺, только A-акции.
   /forecast/hk/{symbol}        -> ET Net (经济通), гонконгские тикеры (BOC/CCB/CITIC и т.д.).
   /forecast/aggregate/{symbol} -> собирает то, что применимо к данному коду, в один JSON.
+
+Показатели, которых у ET Net нет вовсе (см. market_estimates.py):
+  /forecast/revenue/{symbol}   -> прогноз ВЫРУЧКИ с Yahoo Finance, горизонт 2 года.
+  /forecast/bvps/{symbol}      -> прогнозный BVPS расчётом clean surplus.
+  /forecast/eps_scale/{symbol} -> во сколько делить EPS/DPS из ET Net (он отдаёт их
+                                   в сотых долях валюты), определяется сверкой с Yahoo.
+  /forecast/fx_forward         -> курс CNY/HKD, вменённый рынком, горизонт 1 год.
 """
 
 import os
@@ -23,6 +30,7 @@ import akshare as ak
 import pandas as pd
 from fastapi import APIRouter, Header, HTTPException, Query
 
+import market_estimates
 from errors import UpstreamError, call_akshare_with_retry
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -469,6 +477,186 @@ def forecast_hk_brokers(
         "dropped_past_periods": dropped,
         "data": _df_to_records(df),
     }
+
+
+# ---------------------------------------------------------------------------
+# 3b. Показатели, которых нет у ET Net: выручка, BVPS, будущий курс
+# ---------------------------------------------------------------------------
+#
+# ET Net не публикует ни прогноза выручки, ни BVPS (колонка 每股资产净值 в
+# 综合盈利预测 формально есть, но пуста у всех проверенных бумаг), а курса
+# не публикует вообще никто. Раньше эти три строки таблицы уходили в «н/д»
+# просто потому, что их неоткуда было взять. Способы добычи и границы
+# применимости — в market_estimates.py.
+
+_ET_CONSENSUS_EPS = "每股盈利/每股亏损"
+_ET_CONSENSUS_DPS = "每股派息"
+
+
+def _etnet_consensus_by_year(hk_symbol: str) -> tuple:
+    """Достаёт из ET Net консенсусные EPS/DPS, разложенные по финансовым годам."""
+    try:
+        df = call_akshare_with_retry(
+            ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=_ET_DEFAULT_INDICATOR
+        )
+    except Exception as exc:
+        if not _is_no_coverage(exc):
+            raise
+        return {}, {}
+
+    if df is None or df.empty or _COL_FY not in df.columns:
+        return {}, {}
+
+    eps_by_year, dps_by_year = {}, {}
+    for row in df.to_dict(orient="records"):
+        try:
+            year = int(str(row.get(_COL_FY)).strip())
+        except (TypeError, ValueError):
+            continue
+        eps = pd.to_numeric(row.get(_ET_CONSENSUS_EPS), errors="coerce")
+        dps = pd.to_numeric(row.get(_ET_CONSENSUS_DPS), errors="coerce")
+        if pd.notna(eps):
+            eps_by_year[year] = float(eps)
+        if pd.notna(dps):
+            dps_by_year[year] = float(dps)
+    return eps_by_year, dps_by_year
+
+
+@router.get("/revenue/{symbol}")
+def forecast_revenue(
+    symbol: str,
+    market: Optional[str] = Query(
+        None, description='"hk" или "a". Если не задано — определяется по виду кода'
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Консенсус-прогноз ВЫРУЧКИ (которого нет ни у ET Net, ни у AASTOCKS).
+
+    Источник — Yahoo Finance, консенсус S&P Global / TipRanks. Горизонт всего
+    два года: текущий финансовый год и следующий. Более далёкие годы бесплатно
+    не публикует никто — оставляй их пустыми, а не экстраполируй.
+
+    Внимание на две валюты в ответе: выручка выражена в financial_currency
+    (валюта отчётности), а trading_currency — валюта торгов. У гонконгских
+    листингов китайских эмитентов они разные (9988: отчётность CNY, торги HKD).
+    """
+    check_auth(authorization)
+    data = market_estimates.fetch_revenue_forecast(symbol, market)
+    return {**data, "today": _today(), "retrieved_at": _now_iso()}
+
+
+@router.get("/eps_scale/{symbol}")
+def forecast_eps_scale(
+    symbol: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Во сколько раз делить EPS/DPS из ET Net, чтобы получить целые единицы валюты.
+
+    ET Net отдаёт их в сотых долях (аналог центов/仙/分): 511.75 означает 5.12.
+    Множитель здесь не угадывается по порядку величины, а вычисляется сверкой с
+    независимым консенсусом Yahoo по совпавшим финансовым годам — в ответе
+    видно, на каких именно годах и с каким отношением.
+
+    Если divisor=null (Yahoo не знает тикер либо годы не пересеклись) — не
+    подставляй значение молча: покажи пользователю сырое число и расхождение.
+    """
+    check_auth(authorization)
+    hk_symbol = symbol.zfill(5)
+    eps_by_year, _ = _etnet_consensus_by_year(hk_symbol)
+    if not eps_by_year:
+        return {
+            "symbol": hk_symbol,
+            "divisor": None,
+            "confidence": "none",
+            "note": "у ET Net нет консенсусного EPS по этому коду — сверять нечего",
+            "today": _today(),
+            "retrieved_at": _now_iso(),
+        }
+    result = market_estimates.detect_eps_scale(hk_symbol, eps_by_year, market="hk")
+    return {**result, "today": _today(), "retrieved_at": _now_iso()}
+
+
+@router.get("/bvps/{symbol}")
+def forecast_bvps(
+    symbol: str,
+    last_bvps: float = Query(
+        ..., gt=0, description="Последний ФАКТИЧЕСКИЙ BVPS, посчитанный по правилу 7"
+    ),
+    last_bvps_year: int = Query(..., description="Финансовый год этого фактического BVPS"),
+    apply_eps_scale: bool = Query(
+        True, description="Делить EPS/DPS из ET Net на автоопределённый множитель"
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Прогнозный BVPS методом clean surplus: BVPS(t+1) = BVPS(t) + EPS(t+1) - DPS(t+1).
+
+    Это РАСЧЁТ поверх чужих прогнозов EPS/DPS, а не прогноз аналитика — прямого
+    источника прогнозного BVPS в бесплатном доступе нет вообще. Метод не
+    учитывает выкуп акций, допэмиссию и прочий совокупный доход, поэтому у
+    эмитентов с крупными байбеками систематически завышает результат; у банков
+    с ровной дивидендной политикой ошибка мала. Каждый год возвращается с
+    confidence, падающим по мере удаления от факта — переноси это в сноску.
+
+    last_bvps передаёт вызывающий: он у него уже посчитан из баланса по
+    правилу 7, и брать его из второго места значило бы получить два разных
+    BVPS в одной таблице.
+    """
+    check_auth(authorization)
+    hk_symbol = symbol.zfill(5)
+    eps_by_year, dps_by_year = _etnet_consensus_by_year(hk_symbol)
+
+    base = {
+        "symbol": hk_symbol,
+        "today": _today(),
+        "retrieved_at": _now_iso(),
+        "eps_dps_source": "etnet",
+    }
+    if not eps_by_year:
+        return {
+            **base,
+            "found": False,
+            "note": "нет консенсусного EPS у ET Net — катить BVPS вперёд не от чего",
+            "years": [],
+        }
+
+    scale = {"divisor": None, "confidence": "none"}
+    if apply_eps_scale:
+        scale = market_estimates.detect_eps_scale(hk_symbol, eps_by_year, market="hk")
+        divisor = scale.get("divisor")
+        if divisor:
+            eps_by_year = {y: v / divisor for y, v in eps_by_year.items()}
+            dps_by_year = {y: v / divisor for y, v in dps_by_year.items()}
+
+    result = market_estimates.roll_forward_bvps(
+        last_bvps, last_bvps_year, eps_by_year, dps_by_year
+    )
+    if apply_eps_scale and not scale.get("divisor"):
+        result["scale_warning"] = (
+            "Масштаб EPS/DPS подтвердить не удалось, значения взяты как есть. "
+            "Сверь порядок величины с фактическим EPS прежде чем использовать результат."
+        )
+    return {**base, "found": bool(result["years"]), "eps_scale": scale, **result}
+
+
+@router.get("/fx_forward")
+def forecast_fx_forward(authorization: Optional[str] = Header(default=None)):
+    """
+    Будущий курс CNY/HKD — форвард, вменённый рынком (спот CFETS + своп-пункты).
+
+    Это не мнение аналитика, а цена, по которой рынок прямо сейчас готов
+    обменять валюту в будущем. Горизонт — до 1 года; на более далёкие годы
+    бесплатного источника не существует, оставляй их пустыми.
+
+    В ответе есть cross_check: тот же форвард, выведенный вторым путём через
+    привязку HKD к доллару. Если agrees=false — конвенция источника изменилась,
+    и цифру использовать нельзя.
+    """
+    check_auth(authorization)
+    data = market_estimates.fx_forward_cny_hkd()
+    return {**data, "today": _today(), "retrieved_at": _now_iso()}
 
 
 # ---------------------------------------------------------------------------

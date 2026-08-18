@@ -947,6 +947,400 @@ paths:
                 properties:
                   detail:
                     type: string
+  /forecast/revenue/{symbol}:
+    get:
+      operationId: getForecastRevenue
+      summary: >-
+        Консенсус-прогноз ВЫРУЧКИ по акции. Единственный источник выручки в
+        сервисе — у ET Net и AASTOCKS её нет вовсе.
+      description: >-
+        Источник — Yahoo Finance (консенсус S&P Global / TipRanks). Горизонт
+        всего два года: текущий финансовый год и следующий; на более далёкие
+        годы бесплатного источника выручки не существует — оставляй их
+        пустыми, а не экстраполируй. ВАЖНО про валюту: выручка и EPS выражены
+        в financial_currency (валюта отчётности), а trading_currency — это
+        валюта торгов. У гонконгских листингов китайских эмитентов они разные
+        (9988: отчётность CNY, торги HKD) — не подставляй одну вместо другой.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: >-
+            Код без суффикса биржи. Гонконг — "9988", "0700"; A-акции —
+            шестизначный "600519". Вид кода определяется автоматически.
+          schema:
+            type: string
+        - name: market
+          in: query
+          required: false
+          description: >-
+            "hk" или "a" — задавать только если автоопределение по виду кода
+            ошиблось.
+          schema:
+            type: string
+            enum: ["hk", "a"]
+      responses:
+        "200":
+          description: Консенсус по выручке и EPS на два ближайших финансовых года
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  symbol:
+                    type: string
+                  yahoo_symbol:
+                    type: string
+                  found:
+                    type: boolean
+                    description: >-
+                      false — у источника нет такого тикера либо нет оценок
+                      аналитиков. Это нормальный ответ, а не сбой.
+                  financial_currency:
+                    type: string
+                    description: Валюта отчётности — в ней выражены revenue и eps.
+                  trading_currency:
+                    type: string
+                    description: >-
+                      Валюта торгов на бирже. НЕ используй её для выручки.
+                  currency_note:
+                    type: string
+                  horizon_note:
+                    type: string
+                  cached:
+                    type: boolean
+                  cache_age_seconds:
+                    type: integer
+                  today:
+                    type: string
+                  retrieved_at:
+                    type: string
+                  periods:
+                    type: array
+                    description: >-
+                      Только годовые горизонты: "0y" — текущий финансовый год,
+                      "+1y" — следующий.
+                    items:
+                      type: object
+                      properties:
+                        period:
+                          type: string
+                        fiscal_year_end:
+                          type: string
+                          description: Дата окончания финансового года, напр. "2027-03-31".
+                        revenue:
+                          type: object
+                          properties:
+                            avg:
+                              type: number
+                            low:
+                              type: number
+                            high:
+                              type: number
+                            analysts:
+                              type: integer
+                              description: >-
+                                Сколько аналитиков в консенсусе. Указывай это
+                                число рядом со значением: консенсус по двум
+                                домам и по сорока — не одно и то же.
+                        eps:
+                          type: object
+                          properties:
+                            avg:
+                              type: number
+                            low:
+                              type: number
+                            high:
+                              type: number
+                            analysts:
+                              type: integer
+        "429":
+          description: >-
+            Исчерпан суточный лимит обращений к источнику. Уже запрошенные
+            тикеры продолжают отдаваться из кэша.
+          content:
+            application/json:
+              schema:
+                type: object
+        "502":
+          description: Ошибка при обращении к источнику данных
+          content:
+            application/json:
+              schema:
+                type: object
+  /forecast/eps_scale/{symbol}:
+    get:
+      operationId: getForecastEpsScale
+      summary: >-
+        Во сколько раз делить EPS/DPS из ET Net, чтобы получить целые единицы
+        валюты отчётности.
+      description: >-
+        ET Net отдаёт 每股盈利/每股派息 в сотых долях валюты (аналог
+        центов/仙/分): значение 511.75 означает 5.12. Множитель здесь не
+        угадывается по порядку величины, а вычисляется сверкой с независимым
+        консенсусом Yahoo по совпавшим финансовым годам — в поле evidence
+        видно, на каких годах и с каким отношением. Вызывай перед тем, как
+        подставлять прогнозные EPS/DPS куда-либо. Если divisor=null или
+        confidence="low" — не подставляй значение молча, покажи пользователю
+        сырое число и расхождение.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: Код HKEX без .HK, ведущие нули не обязательны.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Определённый множитель с доказательствами
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  divisor:
+                    type: number
+                    description: >-
+                      На это число надо делить EPS/DPS из ET Net. null —
+                      определить не удалось.
+                  confidence:
+                    type: string
+                    enum: ["high", "medium", "low", "none"]
+                  reference_source:
+                    type: string
+                  median_ratio:
+                    type: number
+                  drift_from_power_of_ten:
+                    type: number
+                  note:
+                    type: string
+                  today:
+                    type: string
+                  retrieved_at:
+                    type: string
+                  evidence:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        fiscal_year:
+                          type: integer
+                        etnet_eps:
+                          type: number
+                        yahoo_eps:
+                          type: number
+                        ratio:
+                          type: number
+        "502":
+          description: Ошибка при обращении к источнику данных
+          content:
+            application/json:
+              schema:
+                type: object
+  /forecast/bvps/{symbol}:
+    get:
+      operationId: getForecastBvps
+      summary: >-
+        Прогнозный BVPS расчётом clean surplus на основе консенсусных EPS и
+        DPS. Прямого источника прогнозного BVPS не существует.
+      description: >-
+        Считает BVPS(t+1) = BVPS(t) + EPS(t+1) - DPS(t+1), где EPS и DPS
+        берутся из ET Net и автоматически приводятся к целым единицам валюты.
+        Это РАСЧЁТ поверх чужих прогнозов, а не прогноз аналитика: метод не
+        учитывает выкуп акций, допэмиссию и прочий совокупный доход, поэтому
+        у эмитентов с крупными байбеками систематически завышает результат, а
+        у банков с ровной дивидендной политикой ошибка мала. У каждого года
+        есть confidence, падающий по мере удаления от факта — переноси его в
+        сноску вместе с оговоркой из поля caveat.
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: Код HKEX без .HK, ведущие нули не обязательны.
+          schema:
+            type: string
+        - name: last_bvps
+          in: query
+          required: true
+          description: >-
+            Последний ФАКТИЧЕСКИЙ BVPS, который ты уже посчитал по правилу 7
+            (капитал обыкновенных акционеров / число акций). Передаётся
+            снаружи, чтобы в таблице не оказалось двух разных BVPS.
+          schema:
+            type: number
+        - name: last_bvps_year
+          in: query
+          required: true
+          description: Финансовый год этого фактического BVPS.
+          schema:
+            type: integer
+        - name: apply_eps_scale
+          in: query
+          required: false
+          description: >-
+            По умолчанию true — EPS/DPS делятся на автоопределённый множитель
+            (см. getForecastEpsScale). Отключать только для отладки.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: Расчётный BVPS по годам
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  found:
+                    type: boolean
+                  method:
+                    type: string
+                  formula:
+                    type: string
+                  base_bvps:
+                    type: number
+                  base_year:
+                    type: integer
+                  caveat:
+                    type: string
+                    description: >-
+                      Ограничения метода. Обязательно переноси в сноску к
+                      таблице.
+                  scale_warning:
+                    type: string
+                    description: >-
+                      Присутствует, только если масштаб EPS/DPS подтвердить не
+                      удалось. Тогда результат требует ручной проверки.
+                  eps_scale:
+                    type: object
+                  today:
+                    type: string
+                  retrieved_at:
+                    type: string
+                  years:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        year:
+                          type: integer
+                        bvps:
+                          type: number
+                        eps_used:
+                          type: number
+                        dps_used:
+                          type: number
+                        dps_assumed_zero:
+                          type: boolean
+                          description: >-
+                            true — прогноза дивиденда на этот год нет и он
+                            принят нулевым, из-за чего BVPS завышен.
+                        steps_from_actual:
+                          type: integer
+                        confidence:
+                          type: string
+                          enum: ["high", "medium", "low"]
+        "502":
+          description: Ошибка при обращении к источнику данных
+          content:
+            application/json:
+              schema:
+                type: object
+  /forecast/fx_forward:
+    get:
+      operationId: getForecastFxForward
+      summary: >-
+        Будущий курс CNY/HKD — форвард, вменённый рынком (спот CFETS плюс
+        своп-пункты), а не прогноз аналитика.
+      description: >-
+        Возвращает цену, по которой рынок прямо сейчас готов обменять валюту в
+        будущем, по срокам от недели до года. Горизонт ограничен одним годом:
+        дальше CFETS не котирует, и многолетнего прогноза курса нет ни в одном
+        бесплатном источнике — такие годы оставляй пустыми, линейная
+        экстраполяция здесь бессмысленна. В ответе есть cross_check: тот же
+        форвард, выведенный вторым независимым путём через привязку HKD к
+        доллару. Если cross_check.agrees=false — конвенция источника
+        изменилась, цифру использовать нельзя.
+      responses:
+        "200":
+          description: Форвардные курсы по срокам
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: string
+                  pair:
+                    type: string
+                  basis:
+                    type: string
+                  spot_hkd_cny:
+                    type: number
+                  spot_cny_hkd:
+                    type: number
+                  swap_pip:
+                    type: number
+                  max_horizon:
+                    type: string
+                  horizon_note:
+                    type: string
+                  today:
+                    type: string
+                  retrieved_at:
+                    type: string
+                  cross_check:
+                    type: object
+                    properties:
+                      available:
+                        type: boolean
+                      implied_usd_hkd_spot:
+                        type: number
+                      peg_band_ok:
+                        type: boolean
+                      forward_direct:
+                        type: number
+                      forward_via_usd_peg:
+                        type: number
+                      deviation:
+                        type: number
+                      agrees:
+                        type: boolean
+                      warning:
+                        type: string
+                  tenors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tenor:
+                          type: string
+                          description: >-
+                            Срок котировки — "1周", "1月", "3月", "6月", "9月"
+                            или "1年".
+                        approx_days:
+                          type: integer
+                        swap_points_raw:
+                          type: number
+                        hkd_cny:
+                          type: number
+                        cny_hkd:
+                          type: number
+                          description: >-
+                            Курс 1 CNY в HKD — именно он нужен для строки
+                            "Курс 1 CNY в HKD" в сводной таблице.
+        "502":
+          description: Ошибка при обращении к источнику данных
+          content:
+            application/json:
+              schema:
+                type: object
   /forecast/aggregate/{symbol}:
     get:
       operationId: getForecastAggregate
