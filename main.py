@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -13,6 +14,9 @@ from fastapi.responses import JSONResponse
 from broker_consensus import fetch_aastocks_consensus
 from errors import UpstreamError, cached_call, call_akshare_with_retry, classify_exception
 from forecast_endpoints import router as forecast_router
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("china_securities_proxy.access")
 
 app = FastAPI(title="China Securities Data Proxy")
 app.include_router(forecast_router)
@@ -72,7 +76,55 @@ class NormalizePathMiddleware:
         await self.app(scope, receive, send)
 
 
+class RequestLogMiddleware:
+    """
+    Логирует каждый входящий запрос так, чтобы его можно было опознать.
+
+    Штатный лог uvicorn показывает только внутренний IP прокси Render
+    (10.29.x) — по нему невозможно отличить служебный health-check платформы
+    от вызова внешнего клиента, и вопрос "дошёл ли запрос от ChatGPT вообще"
+    остаётся без ответа. Поэтому дополнительно пишем User-Agent и
+    X-Forwarded-For: у ChatGPT Actions характерный агент, у пингов Render —
+    свой, и в логе они сразу различимы.
+
+    Значение Authorization не логируется никогда — только факт его наличия.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        status_holder = {}
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                status_holder["status"] = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            logger.info(
+                "REQ %s %s -> %s | ua=%r | xff=%s | auth=%s",
+                scope.get("method"),
+                scope.get("path"),
+                status_holder.get("status", "нет ответа"),
+                headers.get("user-agent", "(пусто)")[:120],
+                headers.get("x-forwarded-for", "-"),
+                "есть" if "authorization" in headers else "нет",
+            )
+
+
+# Порядок важен: последний добавленный — самый внешний. Логирование должно
+# охватывать и те запросы, которые нормализация обрабатывает сама (голый
+# OPTIONS), иначе именно проблемные вызовы в лог не попадут.
 app.add_middleware(NormalizePathMiddleware)
+app.add_middleware(RequestLogMiddleware)
 
 
 @app.exception_handler(UpstreamError)
