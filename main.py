@@ -18,6 +18,41 @@ app = FastAPI(title="China Securities Data Proxy")
 app.include_router(forecast_router)
 
 
+# Клиент (в частности ChatGPT Actions) склеивает базовый URL из схемы с путём
+# операции. Если базовый URL сохранён со слэшем на конце, получается "//health",
+# а это уже другой путь: Starlette отдаёт по нему 404. Клиент видит non-2xx на
+# КАЖДОМ вызове, включая /health без авторизации, и это выглядит как полная
+# недоступность сервиса, хотя сервис исправен. Отличить одно от другого по
+# сообщению клиента невозможно, поэтому дешевле не ловить такую опечатку, а
+# сделать её безвредной.
+#
+# Заодно снимаем трейлинг-слэш: на "/health/" Starlette отвечает 307-редиректом,
+# а клиент, не следующий за редиректами, снова получает non-2xx.
+#
+# Нормализуем до маршрутизации, на уровне ASGI-scope. Корень "/" не трогаем.
+class NormalizePathMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            normalized = re.sub(r"/{2,}", "/", path)
+            if len(normalized) > 1:
+                normalized = normalized.rstrip("/") or "/"
+            if normalized != path:
+                scope = dict(scope)
+                scope["path"] = normalized
+                # raw_path используется частью инструментов вместо path —
+                # рассинхрон между ними ломает построение url в ответах.
+                if scope.get("raw_path") is not None:
+                    scope["raw_path"] = normalized.encode("latin-1")
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(NormalizePathMiddleware)
+
+
 @app.exception_handler(UpstreamError)
 async def upstream_error_handler(request: Request, exc: UpstreamError) -> JSONResponse:
     return JSONResponse(

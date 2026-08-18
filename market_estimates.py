@@ -437,7 +437,7 @@ def roll_forward_bvps(
             }
         )
 
-    return {
+    result = {
         "method": "clean_surplus_roll_forward",
         "formula": "BVPS(t+1) = BVPS(t) + EPS(t+1) - DPS(t+1)",
         "base_bvps": float(last_bvps),
@@ -450,6 +450,30 @@ def roll_forward_bvps(
         ),
         "years": steps,
     }
+
+    # Пустой результат почти всегда означает не «нет прогнозов», а разрыв:
+    # база передана за слишком старый год, и первого шага (base_year + 1) в
+    # прогнозах уже нет. Молча отдавать пустой список здесь вредно - вызывающий
+    # решит, что покрытия нет вовсе, хотя достаточно сдвинуть базу на свежий
+    # завершённый финансовый год.
+    if not steps and eps_by_year:
+        available = sorted(int(y) for y in eps_by_year)
+        future = [y for y in available if y > year]
+        if future:
+            result["note"] = (
+                f"Прогноз EPS на {year + 1} отсутствует, поэтому цепочку не от чего "
+                f"начать: у источника есть только {future}. Передай last_bvps за "
+                f"последний ЗАВЕРШЁННЫЙ финансовый год, ближайший к {future[0] - 1}, "
+                "иначе между базой и первым прогнозом останется год без данных."
+            )
+        else:
+            result["note"] = (
+                f"Все прогнозные годы источника ({available}) не позже базового "
+                f"{year} - катить BVPS вперёд не от чего."
+            )
+        result["available_forecast_years"] = available
+
+    return result
 
 
 # ---------------------------------------------------------------------------
