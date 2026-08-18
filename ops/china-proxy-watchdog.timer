@@ -1,0 +1,13 @@
+[Unit]
+Description=Запуск проверки china-securities-proxy каждые 10 минут
+
+[Timer]
+# Первый запуск через 2 минуты после загрузки — чтобы не сработать раньше,
+# чем поднимутся сам сервис и nginx.
+OnBootSec=2min
+OnUnitActiveSec=10min
+# Разброс, чтобы проверка не попадала ровно в одну секунду с другими задачами.
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Проверка доступности china-securities-proxy снаружи
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/china-proxy-watchdog.sh

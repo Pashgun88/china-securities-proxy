@@ -1,0 +1,31 @@
+[Unit]
+Description=China Securities Data Proxy (FastAPI over AKShare)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=pavel
+Group=pavel
+WorkingDirectory=/opt/china-securities-proxy
+EnvironmentFile=/etc/china-securities-proxy.env
+# Один воркер намеренно: в процессе живут TTL-кэши (котировки EM, ответы
+# Yahoo, суточные счётчики обращений к AASTOCKS). При нескольких воркерах
+# кэш и лимиты размножатся по процессам, и потолок обращений к источникам
+# перестанет соблюдаться.
+# venv собран по другому пути и перенесён: шебанг в venv/bin/uvicorn ведёт в
+# несуществующий каталог, поэтому запускаем модулем через интерпретатор venv.
+ExecStart=/opt/china-securities-proxy/venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8010 --workers 1
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# Базовое ужесточение: сервису нужен только свой каталог и сеть.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/china-securities-proxy
+
+[Install]
+WantedBy=multi-user.target
