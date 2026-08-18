@@ -91,6 +91,18 @@ paths:
           description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
           schema:
             type: string
+        - name: periods
+          in: query
+          required: false
+          description: >-
+            Сколько последних отчётных периодов вернуть (по умолчанию 8).
+            Полная история эмитента не помещается в лимит ответа Action,
+            поэтому выдача обрезается с конца — самые свежие периоды всегда
+            попадают в ответ. Увеличивай только если действительно нужны
+            более старые периоды.
+          schema:
+            type: integer
+            default: 8
       responses:
         "200":
           description: Успешный ответ с данными или пустым результатом
@@ -99,6 +111,15 @@ paths:
               schema:
                 type: object
                 properties:
+                  periods_returned:
+                    type: integer
+                    description: Сколько отчётных периодов фактически вернулось
+                  periods_available:
+                    type: integer
+                    description: >-
+                      Сколько всего периодов есть у источника. Если больше
+                      periods_returned, выдача урезана — скажи об этом
+                      пользователю, а не выдавай её за всю историю.
                   data:
                     type: array
                     items:
@@ -125,6 +146,18 @@ paths:
           description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
           schema:
             type: string
+        - name: periods
+          in: query
+          required: false
+          description: >-
+            Сколько последних отчётных периодов вернуть (по умолчанию 8).
+            Полная история эмитента не помещается в лимит ответа Action,
+            поэтому выдача обрезается с конца — самые свежие периоды всегда
+            попадают в ответ. Увеличивай только если действительно нужны
+            более старые периоды.
+          schema:
+            type: integer
+            default: 8
       responses:
         "200":
           description: Успешный ответ с данными или пустым результатом
@@ -133,6 +166,15 @@ paths:
               schema:
                 type: object
                 properties:
+                  periods_returned:
+                    type: integer
+                    description: Сколько отчётных периодов фактически вернулось
+                  periods_available:
+                    type: integer
+                    description: >-
+                      Сколько всего периодов есть у источника. Если больше
+                      periods_returned, выдача урезана — скажи об этом
+                      пользователю, а не выдавай её за всю историю.
                   data:
                     type: array
                     items:
@@ -159,6 +201,18 @@ paths:
           description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
           schema:
             type: string
+        - name: periods
+          in: query
+          required: false
+          description: >-
+            Сколько последних отчётных периодов вернуть (по умолчанию 8).
+            Полная история эмитента не помещается в лимит ответа Action,
+            поэтому выдача обрезается с конца — самые свежие периоды всегда
+            попадают в ответ. Увеличивай только если действительно нужны
+            более старые периоды.
+          schema:
+            type: integer
+            default: 8
       responses:
         "200":
           description: Успешный ответ с данными или пустым результатом
@@ -167,6 +221,15 @@ paths:
               schema:
                 type: object
                 properties:
+                  periods_returned:
+                    type: integer
+                    description: Сколько отчётных периодов фактически вернулось
+                  periods_available:
+                    type: integer
+                    description: >-
+                      Сколько всего периодов есть у источника. Если больше
+                      periods_returned, выдача урезана — скажи об этом
+                      пользователю, а не выдавай её за всю историю.
                   data:
                     type: array
                     items:
@@ -334,6 +397,18 @@ paths:
           description: Тикер (суффиксы .SH/.SZ/.HK будут очищены автоматически)
           schema:
             type: string
+        - name: periods
+          in: query
+          required: false
+          description: >-
+            Сколько последних отчётных периодов вернуть (по умолчанию 8).
+            Полная история эмитента не помещается в лимит ответа Action,
+            поэтому выдача обрезается с конца — самые свежие периоды всегда
+            попадают в ответ. Увеличивай только если действительно нужны
+            более старые периоды.
+          schema:
+            type: integer
+            default: 8
       responses:
         "200":
           description: Успешный ответ с данными или пустым результатом
@@ -342,6 +417,15 @@ paths:
               schema:
                 type: object
                 properties:
+                  periods_returned:
+                    type: integer
+                    description: Сколько отчётных периодов фактически вернулось
+                  periods_available:
+                    type: integer
+                    description: >-
+                      Сколько всего периодов есть у источника. Если больше
+                      periods_returned, выдача урезана — скажи об этом
+                      пользователю, а не выдавай её за всю историю.
                   data:
                     type: array
                     items:

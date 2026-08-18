@@ -86,6 +86,18 @@ def classify_exception(exc: Exception):
     if isinstance(exc, _PARSING_ERRORS):
         _log_response_snapshot(exc)
         return "upstream_response_changed", 502, False
+
+    # akshare не проверяет HTTP-статус: при 5xx от источника он пытается
+    # разобрать страницу ошибки как JSON и падает с JSONDecodeError (подкласс
+    # ValueError). Само исключение при этом выглядит как ошибка разбора, хотя
+    # на деле это временная недоступность апстрима — и клиенту уходило
+    # retryable=False, то есть "не пытайся снова", на сбое, который проходит
+    # сам. Поэтому смотрим на статус последнего фактического ответа.
+    last_status = getattr(_last_response, "status_code", None)
+    if isinstance(last_status, int) and last_status >= 500:
+        _log_response_snapshot(exc)
+        return "upstream_unavailable", 502, True
+
     return "internal_error", 500, False
 
 

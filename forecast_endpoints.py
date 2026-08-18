@@ -45,6 +45,22 @@ _CACHE_TTL_SECONDS = 6 * 60 * 60  # 6 часов
 _em_cache: dict = {"data": None, "ts": 0.0}
 
 
+# У ET Net несуществующий или неподдерживаемый код возвращает обычную страницу
+# без таблиц, и pandas.read_html внутри akshare бросает ValueError("No tables
+# found"). Это не сбой источника, а отсутствие покрытия — раньше оно уезжало в
+# internal_error и выглядело как поломка сервиса.
+_NO_COVERAGE_MARKER = "no tables found"
+
+
+def _is_no_coverage(exc: Exception) -> bool:
+    # call_akshare_with_retry заворачивает исходный ValueError в UpstreamError,
+    # поэтому смотрим и на само исключение, и на его причину, а тип не проверяем.
+    for candidate in (exc, getattr(exc, "__cause__", None)):
+        if candidate is not None and _NO_COVERAGE_MARKER in str(candidate).lower():
+            return True
+    return False
+
+
 def _now_iso() -> str:
     """Дата получения данных — чтобы GPT цитировал её, а не выдумывал актуальность."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -279,7 +295,14 @@ def forecast_hk(
             status_code=400, detail=f"indicator must be exactly one of {_ET_INDICATORS}"
         )
     hk_symbol = symbol.zfill(5)
-    df = call_akshare_with_retry(ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=indicator)
+    try:
+        df = call_akshare_with_retry(
+            ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=indicator
+        )
+    except Exception as exc:
+        if not _is_no_coverage(exc):
+            raise
+        df = None
 
     if df is None or df.empty:
         return {
@@ -386,9 +409,14 @@ def forecast_hk_brokers(
     """
     check_auth(authorization)
     hk_symbol = symbol.zfill(5)
-    df = call_akshare_with_retry(
-        ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=_BROKER_INDICATOR
-    )
+    try:
+        df = call_akshare_with_retry(
+            ak.stock_hk_profit_forecast_et, symbol=hk_symbol, indicator=_BROKER_INDICATOR
+        )
+    except Exception as exc:
+        if not _is_no_coverage(exc):
+            raise
+        df = None
 
     base = {
         "source": "etnet",

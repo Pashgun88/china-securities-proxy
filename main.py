@@ -161,28 +161,82 @@ def auth_check(authorization: Optional[str] = Header(default=None)):
     return result
 
 
+# Отчётность Sina/Eastmoney приходит за всю историю эмитента: у 601939 это
+# 84 периода по 94-150 колонок, то есть 300-400 КБ JSON на один вызов. Рантайм
+# GPT Actions такой ответ отбрасывает целиком (ResponseTooLargeError), и наружу
+# это выглядит как неработающий эндпоинт. Поэтому по умолчанию отдаём только
+# последние periods отчётных дат, а сколько их всего — сообщаем в ответе, чтобы
+# было видно, что выдача урезана, и можно было запросить больше.
+DEFAULT_PERIODS = 8
+
+
+def limit_periods(df: Optional[pd.DataFrame], period_col: str, periods: int) -> tuple:
+    """
+    Оставляет самые свежие periods отчётных дат. Данные приходят от новых к
+    старым, но на порядок источника не полагаемся — берём топ по значению даты,
+    иначе при смене сортировки на той стороне молча отдавались бы старые
+    периоды вместо последних.
+    """
+    if df is None or df.empty or period_col not in df.columns or periods <= 0:
+        return df, None
+
+    all_periods = sorted(df[period_col].dropna().unique(), reverse=True)
+    if len(all_periods) <= periods:
+        return df, len(all_periods)
+
+    keep = set(all_periods[:periods])
+    return df[df[period_col].isin(keep)], len(all_periods)
+
+
+def periods_response(df: Optional[pd.DataFrame], period_col: str, periods: int) -> dict:
+    df, total = limit_periods(df, period_col, periods)
+    result = df_response(df)
+    if total is not None:
+        result["periods_returned"] = min(periods, total)
+        result["periods_available"] = total
+        if total > periods:
+            result["note"] = (
+                f"Показаны {periods} последних отчётных периодов из {total}. "
+                f"Полный ответ не помещается в лимит ответа Action — "
+                f"запросите больше через параметр periods, если нужно."
+            )
+    return result
+
+
 @app.get("/income")
-def income(ts_code: str = Query(...), authorization: Optional[str] = Header(default=None)):
+def income(
+    ts_code: str = Query(...),
+    periods: int = Query(DEFAULT_PERIODS, ge=1, description="Сколько последних отчётных периодов вернуть"),
+    authorization: Optional[str] = Header(default=None),
+):
     check_auth(authorization)
     code = clean_ticker(ts_code)
     df = call_akshare(ak.stock_financial_report_sina, stock=code, symbol="利润表")
-    return df_response(df)
+    return periods_response(df, "报告日", periods)
 
 
 @app.get("/balancesheet")
-def balancesheet(ts_code: str = Query(...), authorization: Optional[str] = Header(default=None)):
+def balancesheet(
+    ts_code: str = Query(...),
+    periods: int = Query(DEFAULT_PERIODS, ge=1, description="Сколько последних отчётных периодов вернуть"),
+    authorization: Optional[str] = Header(default=None),
+):
     check_auth(authorization)
     code = clean_ticker(ts_code)
     df = call_akshare(ak.stock_financial_report_sina, stock=code, symbol="资产负债表")
-    return df_response(df)
+    return periods_response(df, "报告日", periods)
 
 
 @app.get("/cashflow")
-def cashflow(ts_code: str = Query(...), authorization: Optional[str] = Header(default=None)):
+def cashflow(
+    ts_code: str = Query(...),
+    periods: int = Query(DEFAULT_PERIODS, ge=1, description="Сколько последних отчётных периодов вернуть"),
+    authorization: Optional[str] = Header(default=None),
+):
     check_auth(authorization)
     code = clean_ticker(ts_code)
     df = call_akshare(ak.stock_financial_report_sina, stock=code, symbol="现金流量表")
-    return df_response(df)
+    return periods_response(df, "报告日", periods)
 
 
 @app.get("/dividend")
@@ -267,7 +321,11 @@ def hk_daily(
 
 
 @app.get("/hk_financial")
-def hk_financial(ts_code: str = Query(...), authorization: Optional[str] = Header(default=None)):
+def hk_financial(
+    ts_code: str = Query(...),
+    periods: int = Query(DEFAULT_PERIODS, ge=1, description="Сколько последних отчётных дат вернуть"),
+    authorization: Optional[str] = Header(default=None),
+):
     check_auth(authorization)
     code = clean_hk_ticker(ts_code)
     # Финансовая отчётность не меняется внутри дня — кэш на 6ч (как EM-кэш
@@ -280,7 +338,24 @@ def hk_financial(ts_code: str = Query(...), authorization: Optional[str] = Heade
         symbol="资产负债表",
         indicator="年度",
     )
-    return df_response(df)
+    # Отчёт приходит в длинном формате (строка на показатель на дату): у 00939
+    # это 957 строк за всю историю, ~317 КБ. Режем по отчётным датам и заодно
+    # выносим наверх колонки, одинаковые во всех строках (код, название,
+    # тип отчёта) — в длинном формате они дублируются десятки раз и на них
+    # уходит больше половины объёма ответа.
+    result = periods_response(df, "REPORT_DATE", periods)
+    if result["data"]:
+        meta = {}
+        for column in ("SECUCODE", "SECURITY_CODE", "SECURITY_NAME_ABBR", "ORG_CODE",
+                       "DATE_TYPE_CODE", "FISCAL_YEAR", "STD_REPORT_DATE"):
+            values = {row.get(column) for row in result["data"]}
+            if len(values) == 1:
+                meta[column] = values.pop()
+                for row in result["data"]:
+                    row.pop(column, None)
+        if meta:
+            result["meta"] = meta
+    return result
 
 
 @app.get("/fx")
