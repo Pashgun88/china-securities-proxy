@@ -4,10 +4,12 @@
 
 FastAPI-обёртка над [AKShare](https://akshare.akfamily.xyz/) для доступа к
 данным китайских (SSE/SZSE) и гонконгских (HKEX) тикеров: отчётность,
-дивиденды, котировки, валютные курсы. Задеплоена на Render
-(`https://china-securities-proxy.onrender.com`, автодеплой из ветки `main`).
+дивиденды, котировки, валютные курсы. Работает на собственном VPS
+(`https://china.paveln8n.cloud`); про уход с Render и устройство деплоя —
+см. [README.md](README.md).
 Используется как Action в кастомном GPT (ChatGPT). Bearer-токен
-(`PROXY_ACCESS_KEY`) задан в переменных окружения Render, схема Action —
+(`PROXY_ACCESS_KEY`) лежит в `/etc/china-securities-proxy.env` на сервере
+и в репозиторий не попадает, схема Action —
 [openapi_schema.yaml](openapi_schema.yaml), системный промпт GPT —
 [gpt_instructions.txt](gpt_instructions.txt).
 

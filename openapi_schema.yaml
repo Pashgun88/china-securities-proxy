@@ -7,7 +7,7 @@ info:
     и Hong Kong (HKEX) тикеров.
   version: 1.0.0
 servers:
-  - url: https://china-securities-proxy.onrender.com
+  - url: https://china.paveln8n.cloud
 paths:
   /health:
     get:
