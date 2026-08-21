@@ -20,6 +20,7 @@ forecast_endpoints.py
   /forecast/fx_forward         -> курс CNY/HKD, вменённый рынком, горизонт 1 год.
 """
 
+import math
 import os
 import re
 import time
@@ -354,6 +355,7 @@ _COL_BROKER = "证券商"
 _COL_DATE = "更新日期"
 _COL_FY = "财政年度"
 _COL_EPS = "每股盈利"
+_COL_DPS = "每股派息"
 
 # Ступени расширения окна, если в базовом окне не набралось min_brokers.
 _WINDOW_LADDER_DAYS = [60, 90, 180, 365]
@@ -361,6 +363,69 @@ _WINDOW_LADDER_DAYS = [60, 90, 180, 365]
 # Меньше трёх точек — разброс считать не на чем: любое из двух значений
 # формально «вдвое дальше» второго, и разметка выбросов теряет смысл.
 _MIN_POINTS_FOR_OUTLIERS = 3
+
+
+# Отдельные строки ET Net приходят в другом масштабе, чем соседние: у одного
+# дома лишний десятичный разряд. Пример, из-за которого это и появилось —
+# 海通 по 9988: сырой EPS 5897/6775/7732 при медиане остальных 457/670/864,
+# то есть 12.9x, 10.1x и 8.9x. Три разных года и три разных уровня консенсуса,
+# а отклонение каждый раз около десяти: настоящий прогноз так себя не ведёт,
+# это единицы. После деления на 10 значения ложатся внутрь разброса остальных.
+#
+# Без этой поправки строка уезжала в is_outlier, а правило «не пересчитывать
+# среднее без выбросов молча» тянуло её в консенсус и удваивало его: 4.89
+# превращалось в 9.39. Ошибка в заголовочной цифре, ради которой всё и
+# считается.
+#
+# Критерий намеренно самопроверяющийся: мало того, что отношение к медиане
+# близко к степени десяти — исправленное значение обязано попасть ВНУТРЬ
+# диапазона остальных прогнозов того же года. Прогноз, который просто вдвое
+# смелее прочих, ни одному из условий не удовлетворяет и остаётся выбросом,
+# как и должен.
+_SCALE_MIN_RATIO_FOR_FIX = 5.0
+_MIN_PEERS_FOR_SCALE_FIX = 3
+
+
+def _fix_row_scale(df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Приводит строки с чужим масштабом к масштабу соседей внутри своего года."""
+    if column not in df.columns or _COL_FY not in df.columns:
+        return df
+
+    corrected_col = f"{column}__scale_corrected"
+    if corrected_col not in df.columns:
+        df[corrected_col] = None
+
+    for _, group in df.groupby(_COL_FY):
+        values = pd.to_numeric(group[column], errors="coerce").dropna()
+        values = values[values != 0]
+        if len(values) < _MIN_PEERS_FOR_SCALE_FIX + 1:
+            continue
+
+        for idx, value in values.items():
+            peers = values.drop(idx)
+            if len(peers) < _MIN_PEERS_FOR_SCALE_FIX:
+                continue
+            median = peers.median()
+            if not median:
+                continue
+
+            ratio = abs(value) / abs(median)
+            if _SCALE_MIN_RATIO_FOR_FIX > ratio > 1 / _SCALE_MIN_RATIO_FOR_FIX:
+                continue
+
+            exponent = round(math.log10(ratio))
+            if exponent == 0:
+                continue
+            factor = 10.0 ** exponent
+            candidate = value / factor
+
+            # Решающая проверка: исправленное значение должно попасть в тот же
+            # диапазон, что и остальные. Иначе это не масштаб, а сам прогноз.
+            if peers.min() <= candidate <= peers.max():
+                df.loc[idx, column] = candidate
+                df.loc[idx, corrected_col] = factor
+
+    return df
 
 
 def _mark_outliers(df: pd.DataFrame) -> pd.DataFrame:
@@ -372,6 +437,9 @@ def _mark_outliers(df: pd.DataFrame) -> pd.DataFrame:
     Строки НЕ удаляются: whitelist «известных домов» отсутствует, поэтому
     решение, учитывать ли выброс, принимает человек — у него в строке есть имя
     брокера и дата.
+
+    Считается ПОСЛЕ приведения масштаба (_fix_row_scale): иначе строка с чужими
+    единицами всегда выглядит выбросом и маскирует настоящие.
     """
     df = df.copy()
     df["is_outlier"] = False
@@ -463,7 +531,28 @@ def forecast_hk_brokers(
     else:
         coverage_exhausted = df[_COL_BROKER].nunique() < min_brokers
 
+    # Порядок важен: сперва масштаб, потом выбросы. Строка с чужими единицами
+    # всегда выглядит выбросом и маскирует настоящие.
+    df = df.copy()
+    for column in (_COL_EPS, _COL_DPS):
+        df = _fix_row_scale(df, column)
     df = _mark_outliers(df)
+
+    scale_fixes = []
+    for column in (_COL_EPS, _COL_DPS):
+        marker = f"{column}__scale_corrected"
+        if marker not in df.columns:
+            continue
+        for row in df[df[marker].notna()].to_dict(orient="records"):
+            scale_fixes.append(
+                {
+                    "broker": row.get(_COL_BROKER),
+                    "fiscal_year": row.get(_COL_FY),
+                    "field": column,
+                    "divided_by": row[marker],
+                }
+            )
+        df = df.drop(columns=[marker])
 
     return {
         **base,
@@ -475,6 +564,14 @@ def forecast_hk_brokers(
         "rows_count": int(len(df)),
         "coverage_exhausted": coverage_exhausted,
         "dropped_past_periods": dropped,
+        "scale_corrections": scale_fixes,
+        "scale_corrections_note": (
+            "Строки, у которых масштаб не совпадал с остальными прогнозами того же "
+            "года, приведены к общему масштабу: значение поделено на divided_by. "
+            "Признак единиц, а не смелого прогноза - после деления значение попадает "
+            "внутрь диапазона остальных. В data уже исправленные значения; упомяни "
+            "поправку рядом с консенсусом."
+        ) if scale_fixes else None,
         "data": _df_to_records(df),
     }
 

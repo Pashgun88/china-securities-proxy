@@ -920,6 +920,26 @@ paths:
                     type: integer
                   coverage_exhausted:
                     type: boolean
+                  scale_corrections:
+                    type: array
+                    description: >-
+                      Строки, у которых масштаб не совпадал с остальными
+                      прогнозами того же года и был приведён к общему. В data
+                      лежат УЖЕ исправленные значения. Упомяни поправку рядом
+                      с консенсусом: какой дом, какое поле, на что поделено.
+                    items:
+                      type: object
+                      properties:
+                        broker:
+                          type: string
+                        fiscal_year:
+                          type: string
+                        field:
+                          type: string
+                        divided_by:
+                          type: number
+                  scale_corrections_note:
+                    type: string
                     description: >-
                       true — покрытия не хватает даже без ограничения по дате
                       (аналитиков по бумаге физически меньше min_brokers).
